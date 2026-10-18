@@ -1,3 +1,4 @@
+import { messages } from "./messages";
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -87,7 +88,11 @@ export function Modal({
           <h2 id={id}>{title}</h2>
           {subtitle && <p id={id + "-sub"}>{subtitle}</p>}
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="閉じる">
+        <button
+          className="icon-button"
+          onClick={onClose}
+          aria-label={messages.common.close}
+        >
           <X size={21} />
         </button>
       </div>
@@ -118,7 +123,7 @@ export function TodoCard({
         "todo-card group " + (todo.status === "done" ? "card-done" : "")
       }
       onClick={onOpen}
-      aria-label={todo.title + "の詳細を開く"}
+      aria-label={messages.todo.openLabel(todo.title)}
     >
       <div className="flex items-center justify-between gap-3">
         <span className={"status-badge status-" + todo.status}>
@@ -133,7 +138,7 @@ export function TodoCard({
         </span>
         <span className={"priority priority-" + todo.priority}>
           <Flag size={13} />
-          優先度 {PRIORITY[todo.priority]}
+          {messages.todo.priorityLabel(PRIORITY[todo.priority])}
         </span>
       </div>
       <h3>{todo.title}</h3>
@@ -146,12 +151,12 @@ export function TodoCard({
                 todo.deadline,
                 new Date(todo.deadline).getFullYear() !== now.getFullYear(),
               )
-            : "期限なし"}
+            : messages.todo.noDeadline}
         </span>
         {overdue ? (
-          <span className="due-label">期限超過</span>
+          <span className="due-label">{messages.filters.heading.overdue}</span>
         ) : isToday(todo.deadline, now) && todo.status !== "done" ? (
-          <span className="due-label today-label">今日</span>
+          <span className="due-label today-label">{messages.todo.today}</span>
         ) : null}
       </div>
       {latest && (
@@ -161,9 +166,9 @@ export function TodoCard({
         </div>
       )}
       <div className="card-footer">
-        <span>{todo.notes.length}件のメモ</span>
+        <span>{messages.todo.noteCount(todo.notes.length)}</span>
         <span className="card-open">
-          詳細を開く
+          {messages.todo.open}
           <ArrowUpRight size={16} />
         </span>
       </div>
@@ -211,7 +216,7 @@ export function TodoForm({
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!title.trim()) {
-      setError("タイトルを入力してください。");
+      setError(messages.todo.titleRequired);
       return;
     }
     let deadlineIso: string | null = null;
@@ -221,18 +226,21 @@ export function TodoForm({
         !Number.isFinite(new Date(deadline).getTime()) ||
         toDateInput(new Date(deadline).toISOString()) !== deadline
       ) {
-        setError("有効な期限日時を入力してください。");
+        setError(messages.todo.invalidDeadline);
         return;
       }
       deadlineIso = new Date(deadline).toISOString();
     }
     if (noDeadline && (!todo || todo.deadline !== null)) {
       const confirmed = await ask({
-        title: "期限なしで" + (todo ? "保存" : "作成") + "しますか？",
-        description:
-          "期限なしのTODOは期限順の最後に表示されます。期限はあとから設定できます。",
-        confirm: "期限なしで" + (todo ? "保存" : "作成"),
-        cancel: "期限を設定する",
+        title: todo
+          ? messages.todo.noDeadlineConfirm.saveTitle
+          : messages.todo.noDeadlineConfirm.createTitle,
+        description: messages.todo.noDeadlineConfirm.description,
+        confirm: todo
+          ? messages.todo.noDeadlineConfirm.save
+          : messages.todo.noDeadlineConfirm.create,
+        cancel: messages.todo.noDeadlineConfirm.set,
       });
       if (!confirmed) {
         setNoDeadline(false);
@@ -253,7 +261,8 @@ export function TodoForm({
   return (
     <form onSubmit={submit} className="todo-form">
       <label className="field-label" htmlFor="todo-title">
-        タイトル<span className="required">必須</span>
+        {messages.todo.title}
+        <span className="required">{messages.common.required}</span>
       </label>
       <input
         autoFocus={!focusDeadline}
@@ -265,14 +274,17 @@ export function TodoForm({
         }}
         maxLength={120}
         required
-        placeholder="タイトル"
+        placeholder={messages.todo.title}
         className="field title-input"
       />
       <div className="field-heading">
         <label className="field-label" htmlFor="todo-description">
-          説明<span className="optional">任意</span>
+          {messages.todo.description}
+          <span className="optional">{messages.common.optional}</span>
         </label>
-        <span className="char-count">{description.length} / 2000</span>
+        <span className="char-count">
+          {messages.common.characters(description.length, 2000)}
+        </span>
       </div>
       <textarea
         id="todo-description"
@@ -280,12 +292,12 @@ export function TodoForm({
         onChange={(e) => setDescription(e.target.value)}
         maxLength={2000}
         rows={3}
-        placeholder="説明"
+        placeholder={messages.todo.description}
         className="field"
       />
       <div className="field-heading">
         <label className="field-label" htmlFor="todo-deadline">
-          期限
+          {messages.todo.deadline}
         </label>
         <label className="checkbox-label">
           <input
@@ -293,13 +305,13 @@ export function TodoForm({
             checked={noDeadline}
             onChange={(e) => setNoDeadline(e.target.checked)}
           />
-          期限を設定しない
+          {messages.todo.omitDeadline}
         </label>
       </div>
       {noDeadline ? (
         <div className="inline-notice">
           <CalendarDays size={17} />
-          <span>期限なし</span>
+          <span>{messages.todo.noDeadline}</span>
         </div>
       ) : (
         <>
@@ -318,7 +330,7 @@ export function TodoForm({
         </>
       )}
       <fieldset className="priority-field">
-        <legend className="field-label">優先度</legend>
+        <legend className="field-label">{messages.todo.priority}</legend>
         <div className="priority-options">
           {(["high", "medium", "low"] as Priority[]).map((p) => (
             <label
@@ -346,7 +358,7 @@ export function TodoForm({
       {todo && (
         <>
           <label className="field-label" htmlFor="edit-status">
-            状態
+            {messages.todo.state}
           </label>
           <select
             id="edit-status"
@@ -374,11 +386,11 @@ export function TodoForm({
           className="button button-secondary"
           onClick={onCancel}
         >
-          キャンセル
+          {messages.common.cancel}
         </button>
         <button type="submit" className="button button-primary">
           {todo ? <Check size={18} /> : <Plus size={18} />}{" "}
-          {todo ? "変更を保存" : "TODOを作成"}
+          {todo ? messages.todo.save : messages.todo.createAction}
         </button>
       </div>
     </form>
@@ -437,7 +449,7 @@ export function TodoDetail({
     if (
       onUpdate(
         { ...todo, notes: [...todo.notes, note], updatedAt: note.createdAt },
-        "送信しました",
+        messages.chat.sent,
       )
     ) {
       scrollAfterSend.current = true;
@@ -447,18 +459,22 @@ export function TodoDetail({
   }
   return (
     <div className="detail-content">
-      <section className="detail-overview" aria-label="TODOの内容">
+      <section className="detail-overview" aria-label={messages.todo.details}>
         <div className="detail-meta">
           <span className={"priority priority-" + todo.priority}>
             <Flag size={15} />
-            優先度 {PRIORITY[todo.priority]}
+            {messages.todo.priorityLabel(PRIORITY[todo.priority])}
           </span>
           <span
             className={"detail-due " + (isOverdue(todo, now) ? "overdue" : "")}
           >
             <CalendarDays size={16} />
-            {todo.deadline ? dateText(todo.deadline, true) : "期限なし"}
-            {isOverdue(todo, now) && <strong>期限超過</strong>}
+            {todo.deadline
+              ? dateText(todo.deadline, true)
+              : messages.todo.noDeadline}
+            {isOverdue(todo, now) && (
+              <strong>{messages.filters.heading.overdue}</strong>
+            )}
           </span>
         </div>
         {todo.description && (
@@ -467,7 +483,7 @@ export function TodoDetail({
         <div className="detail-controls">
           <div className="status-control">
             <label className="field-label" htmlFor="detail-status">
-              状態
+              {messages.todo.state}
             </label>
             <select
               id="detail-status"
@@ -480,7 +496,7 @@ export function TodoDetail({
                     status: e.target.value as Status,
                     updatedAt: new Date().toISOString(),
                   },
-                  "状態を更新しました",
+                  messages.todo.stateUpdated,
                 )
               }
             >
@@ -493,19 +509,19 @@ export function TodoDetail({
           </div>
           <button className="button button-secondary" onClick={() => onEdit()}>
             <Pencil size={16} />
-            TODOを編集
+            {messages.todo.edit}
           </button>
         </div>
       </section>
       <section className="chat" aria-labelledby="notes-heading">
         <div className="chat-heading">
-          <h3 id="notes-heading">メモ</h3>
+          <h3 id="notes-heading">{messages.chat.title}</h3>
           <span>{todo.notes.length}</span>
         </div>
         <ol
           ref={thread}
           className="chat-thread"
-          aria-label="メモの履歴"
+          aria-label={messages.chat.history}
           tabIndex={todo.notes.length ? 0 : undefined}
         >
           {todo.notes.map((note) => (
@@ -514,7 +530,7 @@ export function TodoDetail({
                 <UserRound size={21} strokeWidth={1.7} />
               </span>
               <div className="message-content">
-                <span className="message-name">自分</span>
+                <span className="message-name">{messages.chat.self}</span>
                 <time className="message-time" dateTime={note.createdAt}>
                   {clockText(new Date(note.createdAt))}
                 </time>
@@ -525,14 +541,14 @@ export function TodoDetail({
         </ol>
         <form className="chat-composer" onSubmit={post}>
           <label htmlFor="new-note" className="sr-only">
-            メモを入力
+            {messages.chat.input}
           </label>
           <textarea
             ref={composer}
             id="new-note"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="メモを入力"
+            placeholder={messages.chat.input}
             maxLength={2000}
             rows={2}
             onKeyDown={(e) => {
@@ -547,13 +563,15 @@ export function TodoDetail({
             }}
           />
           <div className="composer-actions">
-            <span className="char-count">{text.length} / 2000</span>
+            <span className="char-count">
+              {messages.common.characters(text.length, 2000)}
+            </span>
             <button
               type="submit"
               className="send-button"
               disabled={!text.trim()}
-              aria-label="送信"
-              title="送信（Ctrl+Enter / ⌘+Enter）"
+              aria-label={messages.chat.send}
+              title={messages.chat.sendShortcut}
             >
               <ArrowUp size={20} />
             </button>
@@ -563,7 +581,7 @@ export function TodoDetail({
       <footer className="detail-footer">
         <button className="text-button danger-text" onClick={onDelete}>
           <Trash2 size={16} />
-          TODOを削除
+          {messages.todo.delete}
         </button>
         <div className="calendar-action">
           {url ? (
@@ -572,21 +590,23 @@ export function TodoDetail({
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="Googleカレンダーに登録（別タブで開く）"
+              aria-label={messages.calendar.openLabel}
             >
               <CalendarDays size={17} />
-              Googleカレンダーに登録
+              {messages.calendar.register}
               <ArrowUpRight size={15} />
             </a>
           ) : (
             <>
-              <span className="calendar-reason">期限未設定</span>
+              <span className="calendar-reason">
+                {messages.calendar.deadlineMissing}
+              </span>
               <button
                 className="button button-secondary"
                 onClick={() => onEdit(true)}
               >
                 <CalendarDays size={17} />
-                期限を設定
+                {messages.calendar.setDeadline}
               </button>
             </>
           )}

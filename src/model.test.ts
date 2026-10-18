@@ -115,3 +115,26 @@ describe("TODOの表示と保存", () => {
       expect(() => parseTodos(raw)).toThrow();
   });
 });
+
+describe("期限超過の一覧", () => {
+  it("期限を過ぎた未完了だけを表示し、完了済み・期限なし・同時刻・未来は除く", () => {
+    const past = new Date(now.getTime() - 60000).toISOString();
+    const future = new Date(now.getTime() + 60000).toISOString();
+    const list = [
+      make("past", past),
+      { ...make("doing", past), status: "doing" as const },
+      { ...make("done", past), status: "done" as const },
+      make("none", null),
+      make("exact", now.toISOString()),
+      make("future", future),
+    ];
+    expect(
+      selectTodos(list, "overdue", "", "deadline", now)
+        .map((t) => t.id)
+        .sort(),
+    ).toEqual(["doing", "past"]);
+    expect(
+      selectTodos(list, "overdue", "doing", "deadline", now).map((t) => t.id),
+    ).toEqual(["doing"]);
+  });
+});

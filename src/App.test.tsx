@@ -309,3 +309,45 @@ describe("利用者の操作", () => {
     ).toBeTruthy();
   });
 });
+
+describe("期限超過メニュー", () => {
+  it("すべてのTODOと未完了の間に表示し、件数と表示対象を未完了の期限超過に絞る", async () => {
+    const past = new Date(Date.now() - 60000).toISOString();
+    const future = new Date(Date.now() + 3600000).toISOString();
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeTodos([
+        { ...task(), id: "expired", title: "期限超過の課題", deadline: past },
+        {
+          ...task(),
+          id: "finished",
+          title: "完了済みの課題",
+          deadline: past,
+          status: "done",
+        },
+        { ...task(), id: "none", title: "期限なしの課題", deadline: null },
+        { ...task(), id: "later", title: "これからの課題", deadline: future },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    const nav = within(screen.getByRole("navigation", { name: "TODOの表示" }));
+    const buttons = nav.getAllByRole("button");
+    expect(buttons.slice(0, 3).map((b) => b.textContent)).toEqual([
+      "すべてのTODO4",
+      "期限超過1",
+      "未完了3",
+    ]);
+    await user.click(nav.getByRole("button", { name: /^期限超過/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "期限超過1",
+    );
+    expect(
+      screen.getByRole("button", { name: "期限超過の課題の詳細を開く" }),
+    ).toBeTruthy();
+    for (const title of ["完了済みの課題", "期限なしの課題", "これからの課題"])
+      expect(
+        screen.queryByRole("button", { name: title + "の詳細を開く" }),
+      ).toBeNull();
+  });
+});

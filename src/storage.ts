@@ -1,3 +1,4 @@
+import { messages } from "./messages";
 import { useEffect, useState } from "react";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
@@ -16,8 +17,8 @@ function load(): Stored {
       todos: [],
       recovery: raw,
       error: raw
-        ? "保存データを読み込めませんでした。元のデータは変更していません。「データの保存」から書き出し、または復元してください。"
-        : "ブラウザの保存領域を利用できません。設定でサイトデータの保存を許可してください。",
+        ? messages.errors.corruptStorage
+        : messages.errors.storageUnavailable,
     };
   }
 }
@@ -39,8 +40,7 @@ export function useTodoStore() {
     } catch {
       setStored((s) => ({
         ...s,
-        error:
-          "保存できませんでした。保存容量やブラウザの設定を確認してください。変更は保存されていません。",
+        error: messages.errors.save,
       }));
       return false;
     }

@@ -1,3 +1,4 @@
+import { messages } from "./messages";
 import { useMemo, useRef, useState } from "react";
 import { AlertCircle, Download, Trash2, Upload } from "lucide-react";
 import { parseTodos, planRestore, serializeTodos, STORAGE_KEY } from "./model";
@@ -11,24 +12,7 @@ interface Props {
   notify: (message: string) => void;
   onRestored: () => void;
 }
-const MODES: { value: RestoreMode; label: string; description: string }[] = [
-  {
-    value: "replace",
-    label: "完全上書き",
-    description: "現在のTODOとメモを、ファイルの内容に置き換えます。",
-  },
-  {
-    value: "merge",
-    label: "更新＋新規追加",
-    description:
-      "同じIDは読み込んだ値で更新し、メモを時系列に統合。新しいIDも追加します。",
-  },
-  {
-    value: "add",
-    label: "ないTODOだけ追加",
-    description: "新しいIDだけ追加します。同じIDのTODOとメモは変更しません。",
-  },
-];
+const MODES: RestoreMode[] = ["replace", "merge", "add"];
 export function DataPanel({
   todos,
   recovery,
@@ -57,7 +41,7 @@ export function DataPanel({
     } catch (e) {
       return {
         plan: null,
-        error: e instanceof Error ? e.message : "復元できません。",
+        error: e instanceof Error ? e.message : messages.errors.restore,
       };
     }
   }, [todos, candidate, mode]);
@@ -80,12 +64,10 @@ export function DataPanel({
     setCandidate(null);
     try {
       if (file.size > 10 * 1024 * 1024)
-        throw new Error("10MB以下のJSONファイルを選択してください。");
+        throw new Error(messages.errors.fileTooLarge);
       setCandidate({ name: file.name, todos: parseTodos(await file.text()) });
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "ファイルを読み込めませんでした。",
-      );
+      setError(e instanceof Error ? e.message : messages.errors.readFile);
     } finally {
       setLoading(false);
       if (fileInput.current) fileInput.current.value = "";
@@ -98,23 +80,16 @@ export function DataPanel({
     setError("");
     try {
       const confirmed = await ask({
-        title:
-          MODES.find((option) => option.value === mode)!.label +
-          "で復元しますか？",
-        description:
-          "追加 " +
-          plan.added +
-          "件、更新 " +
-          plan.updated +
-          "件、削除 " +
-          plan.removed +
-          "件。" +
-          (mode === "replace"
-            ? "現在のTODOとメモを置き換えます。元に戻せません。"
-            : mode === "merge"
-              ? "同じIDの項目は読み込んだ値を採用します。メモは日時順に統合し、同じメモIDは読み込んだ内容を採用します。"
-              : "既存のTODOとメモは変更しません。"),
-        confirm: "復元する",
+        title: messages.data.restoreConfirmTitle(
+          messages.data.modes[mode].label,
+        ),
+        description: messages.data.restoreConfirmDescription(
+          plan.added,
+          plan.updated,
+          plan.removed,
+          messages.data.modes[mode].confirmation,
+        ),
+        confirm: messages.data.restore,
         danger: mode !== "add",
       });
       if (!confirmed) return;
@@ -122,22 +97,12 @@ export function DataPanel({
         latest.current.todos !== todos ||
         latest.current.recovery !== recovery
       ) {
-        setError(
-          "確認中に保存データが更新されました。変更件数を確認し、もう一度実行してください。",
-        );
+        setError(messages.errors.changedBeforeRestore);
         return;
       }
       if (save(plan.todos, mode === "replace")) {
         setCandidate(null);
-        notify(
-          "復元しました（追加 " +
-            plan.added +
-            "件・更新 " +
-            plan.updated +
-            "件・削除 " +
-            plan.removed +
-            "件）",
-        );
+        notify(messages.data.restored(plan.added, plan.updated, plan.removed));
         onRestored();
       }
     } finally {
@@ -153,15 +118,13 @@ export function DataPanel({
         await ask({
           title:
             bulkScope === "done"
-              ? "完了済みのTODOを削除しますか？"
-              : "すべてのTODOを削除しますか？",
-          description:
-            "TODO " +
-            targets.length +
-            "件とメモ " +
-            countNotes(targets) +
-            "件を削除します。元に戻せません。必要なデータは先に書き出してください。",
-          confirm: "まとめて削除",
+              ? messages.data.bulk.doneTitle
+              : messages.data.bulk.allTitle,
+          description: messages.data.bulk.confirmation(
+            targets.length,
+            countNotes(targets),
+          ),
+          confirm: messages.data.bulk.action,
           danger: true,
         })
       ) {
@@ -169,9 +132,7 @@ export function DataPanel({
           latest.current.todos !== todos ||
           latest.current.recovery !== recovery
         ) {
-          setError(
-            "確認中に保存データが更新されました。削除対象を確認し、もう一度実行してください。",
-          );
+          setError(messages.errors.changedBeforeDelete);
           return;
         }
         if (
@@ -181,7 +142,7 @@ export function DataPanel({
             ),
           )
         )
-          notify("TODO " + targets.length + "件を削除しました");
+          notify(messages.data.bulk.deleted(targets.length));
       }
     } finally {
       setBusy(false);
@@ -196,11 +157,13 @@ export function DataPanel({
         </p>
       )}
       <p className="storage-summary">
-        TODO {todos.length}件・メモ {countNotes(todos)}件
-        <span>保存量（概算）{(storageBytes / 1024).toFixed(1)} KiB</span>
+        {messages.data.summary(todos.length, countNotes(todos))}
+        <span>
+          {messages.data.storageSize((storageBytes / 1024).toFixed(1))}
+        </span>
       </p>
       <section className="data-action" aria-labelledby="export-title">
-        <h3 id="export-title">バックアップを書き出す</h3>
+        <h3 id="export-title">{messages.data.exportTitle}</h3>
         <button
           className="button button-secondary"
           onClick={() => {
@@ -210,57 +173,54 @@ export function DataPanel({
             );
             const link = document.createElement("a");
             link.href = url;
-            link.download =
-              "todo-" + new Date().toISOString().slice(0, 10) + ".json";
+            link.download = messages.data.backupFilename(
+              new Date().toISOString().slice(0, 10),
+            );
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
-            notify("バックアップの書き出しを開始しました");
+            notify(messages.data.exportStarted);
           }}
         >
           <Download size={17} />
-          書き出す
+          {messages.data.export}
         </button>
       </section>
       <section
         className="data-action restore-section"
         aria-labelledby="restore-title"
       >
-        <h3 id="restore-title">バックアップから復元する</h3>
+        <h3 id="restore-title">{messages.data.restoreTitle}</h3>
         <fieldset className="restore-modes" disabled={loading || busy}>
-          <legend className="sr-only">復元方法</legend>
+          <legend className="sr-only">{messages.data.method}</legend>
           {MODES.map((option) => (
             <label
               className={
-                "restore-option " + (mode === option.value ? "selected" : "")
+                "restore-option " + (mode === option ? "selected" : "")
               }
-              key={option.value}
+              key={option}
             >
               <input
                 type="radio"
                 name="restore-mode"
-                value={option.value}
-                checked={mode === option.value}
-                onChange={() => setMode(option.value)}
-                disabled={!!recovery && option.value !== "replace"}
+                value={option}
+                checked={mode === option}
+                onChange={() => setMode(option)}
+                disabled={!!recovery && option !== "replace"}
               />
               <span>
-                <strong>{option.label}</strong>
-                <span>{option.description}</span>
+                <strong>{messages.data.modes[option].label}</strong>
+                <span>{messages.data.modes[option].description}</span>
               </span>
             </label>
           ))}
         </fieldset>
-        {recovery && (
-          <p className="field-hint">
-            保存データを読み込めないため、完全上書きのみ利用できます。
-          </p>
-        )}
+        {recovery && <p className="field-hint">{messages.data.replaceOnly}</p>}
         <input
           ref={fileInput}
           type="file"
           accept=".json,application/json"
           hidden
-          aria-label="復元するJSONファイル"
+          aria-label={messages.data.fileLabel}
           onChange={(e) => readFile(e.target.files?.[0])}
         />
         <button
@@ -269,36 +229,38 @@ export function DataPanel({
           onClick={() => fileInput.current?.click()}
         >
           <Upload size={17} />
-          {loading ? "読み込み中…" : "ファイルを選ぶ"}
+          {loading ? messages.data.loading : messages.data.chooseFile}
         </button>
         {candidate && (
           <div className="restore-preview" aria-live="polite">
             <p className="import-filename">
               {candidate.name}
-              <span>{candidate.todos.length}件</span>
+              <span>{messages.common.items(candidate.todos.length)}</span>
             </p>
             {preview.plan && (
               <>
                 <dl>
                   <div>
-                    <dt>追加</dt>
-                    <dd>{preview.plan.added}件</dd>
+                    <dt>{messages.data.preview.added}</dt>
+                    <dd>{messages.common.items(preview.plan.added)}</dd>
                   </div>
                   <div>
-                    <dt>更新</dt>
-                    <dd>{preview.plan.updated}件</dd>
+                    <dt>{messages.data.preview.updated}</dt>
+                    <dd>{messages.common.items(preview.plan.updated)}</dd>
                   </div>
                   <div>
-                    <dt>削除</dt>
-                    <dd>{preview.plan.removed}件</dd>
+                    <dt>{messages.data.preview.removed}</dt>
+                    <dd>{messages.common.items(preview.plan.removed)}</dd>
                   </div>
                   <div>
-                    <dt>復元後</dt>
-                    <dd>{preview.plan.todos.length}件</dd>
+                    <dt>{messages.data.preview.total}</dt>
+                    <dd>{messages.common.items(preview.plan.todos.length)}</dd>
                   </div>
                 </dl>
                 {!changed && (
-                  <p className="field-hint">変更対象がありません。</p>
+                  <p className="field-hint">
+                    {messages.data.preview.unchanged}
+                  </p>
                 )}
               </>
             )}
@@ -316,7 +278,7 @@ export function DataPanel({
             onClick={restore}
             disabled={!changed || !preview.plan || busy || loading}
           >
-            復元する
+            {messages.data.restore}
           </button>
         )}
       </section>
@@ -324,9 +286,9 @@ export function DataPanel({
         className="data-action bulk-section"
         aria-labelledby="bulk-title"
       >
-        <h3 id="bulk-title">TODOの一括削除</h3>
+        <h3 id="bulk-title">{messages.data.bulk.title}</h3>
         <label className="field-label" htmlFor="bulk-scope">
-          削除対象
+          {messages.data.bulk.target}
         </label>
         <select
           className="field"
@@ -335,20 +297,20 @@ export function DataPanel({
           onChange={(e) => setBulkScope(e.target.value as "done" | "all")}
           disabled={!!recovery || busy}
         >
-          <option value="done">完了済みのTODO</option>
-          <option value="all">すべてのTODO</option>
+          <option value="done">{messages.data.bulk.done}</option>
+          <option value="all">{messages.data.bulk.all}</option>
         </select>
         <p className="bulk-count">
-          TODO {targets.length}件・メモ {countNotes(targets)}件
+          {messages.data.summary(targets.length, countNotes(targets))}
         </p>
-        <p className="field-hint">メモも削除されます。元に戻せません。</p>
+        <p className="field-hint">{messages.data.bulk.notice}</p>
         <button
           className="button button-danger"
           disabled={!targets.length || !!recovery || busy}
           onClick={bulkDelete}
         >
           <Trash2 size={17} />
-          まとめて削除
+          {messages.data.bulk.action}
         </button>
       </section>
     </>

@@ -7,7 +7,7 @@
 }
 :root {
   --sidebar-width: 224px;
-  --header-height: 106px;
+  --header-height: 53px;
   font-family: var(--font-sans);
   color: #253348;
   background: #fff;
@@ -206,12 +206,17 @@ a svg {
   height: var(--header-height);
   isolation: isolate;
   overflow: hidden;
-  background: #f5faff;
-  border-bottom: 1px solid #c7dff6;
+  background: rgba(240, 249, 255, 0.58);
+  backdrop-filter: blur(22px) saturate(1.6);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6);
+  border-bottom: 1px solid rgba(155, 193, 229, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 12px rgba(42, 99, 151, 0.05);
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 26px 44px;
+  padding: 0 44px;
 }
 .header-waves {
   position: absolute;
@@ -219,6 +224,7 @@ a svg {
   width: 100%;
   height: 100%;
   z-index: -1;
+  opacity: 0.4;
   pointer-events: none;
 }
 .clock {
@@ -1168,7 +1174,7 @@ input[type="checkbox"] {
 @media (max-width: 760px) {
   :root {
     --sidebar-width: 0px;
-    --header-height: 88px;
+    --header-height: 44px;
   }
   .sidebar {
     position: static;
@@ -1232,8 +1238,8 @@ input[type="checkbox"] {
     padding-top: 0;
   }
   .topbar {
-    padding: 24px 22px 14px;
-    min-height: 72px;
+    padding: 0 22px;
+    min-height: 0;
   }
   .clock {
     gap: 8px;
@@ -1269,7 +1275,7 @@ input[type="checkbox"] {
     padding-inline: 17px;
   }
   .topbar {
-    padding: 23px 17px 10px;
+    padding: 0 17px;
   }
   .clock {
     gap: 7px;
@@ -1687,5 +1693,54 @@ input[type="checkbox"] {
   }
   .restore-preview dl {
     gap: 5px;
+  }
+}
+
+/* Allow the memo's native scroll chain to reach the enclosing modal. */
+.modal-wide[open] {
+  display: block;
+  height: auto;
+  max-height: 92dvh;
+  overflow-y: auto;
+  scroll-padding-block: 90px 76px;
+}
+.modal-wide .detail-content {
+  display: block;
+}
+.modal-wide .detail-overview {
+  max-height: none;
+  overflow: visible;
+}
+.modal-wide .chat {
+  min-height: 0;
+}
+.modal-wide .chat-thread {
+  flex: none;
+  height: clamp(160px, 32dvh, 340px);
+  min-height: 160px;
+  max-height: 340px;
+  overscroll-behavior: auto;
+}
+.modal-wide .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fff;
+}
+.modal-wide .detail-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
+@media (max-width: 480px) {
+  .modal-wide[open] {
+    max-height: 94dvh;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .topbar {
+    background: #eaf5ff;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }

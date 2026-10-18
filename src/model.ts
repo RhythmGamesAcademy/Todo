@@ -1,6 +1,7 @@
+import { messages } from "./messages";
 export type Status = "todo" | "doing" | "done";
 export type Priority = "high" | "medium" | "low";
-export type Filter = "all" | "active" | "today" | "doing" | "done";
+export type Filter = "all" | "overdue" | "active" | "today" | "doing" | "done";
 export type Sort = "deadline" | "priority";
 export interface Note {
   id: string;
@@ -27,52 +28,15 @@ export interface TodoDraft {
   status: Status;
 }
 export const STORAGE_KEY = "hitotsuzutsu.todos.v1";
-export const STATUS: Record<Status, string> = {
-  todo: "未着手",
-  doing: "進行中",
-  done: "完了",
-};
-export const PRIORITY: Record<Priority, string> = {
-  high: "高",
-  medium: "中",
-  low: "低",
-};
-export const FILTER_LABEL: Record<Filter, string> = {
-  all: "すべてのTODO",
-  active: "未完了",
-  today: "今日が期限",
-  doing: "進行中",
-  done: "完了したTODO",
-};
+export const STATUS: Record<Status, string> = messages.status;
+export const PRIORITY: Record<Priority, string> = messages.priority;
+export const FILTER_LABEL: Record<Filter, string> = messages.filters.heading;
 export const pad = (n: number) => String(n).padStart(2, "0");
 export function clockText(date: Date) {
-  return (
-    date.getFullYear() +
-    "年" +
-    pad(date.getMonth() + 1) +
-    "月" +
-    pad(date.getDate()) +
-    "日 " +
-    pad(date.getHours()) +
-    "時" +
-    pad(date.getMinutes()) +
-    "分" +
-    pad(date.getSeconds()) +
-    "秒"
-  );
+  return messages.dateTime.clock(date);
 }
 export function dateText(iso: string, year = false) {
-  const date = new Date(iso);
-  return (
-    (year ? date.getFullYear() + "年" : "") +
-    (date.getMonth() + 1) +
-    "月" +
-    date.getDate() +
-    "日 " +
-    pad(date.getHours()) +
-    ":" +
-    pad(date.getMinutes())
-  );
+  return messages.dateTime.deadline(new Date(iso), year);
 }
 export function toDateInput(iso: string) {
   const d = new Date(iso);
@@ -113,6 +77,7 @@ export function selectTodos(
     .filter((t) => {
       const matches =
         filter === "all" ||
+        (filter === "overdue" && isOverdue(t, now)) ||
         (filter === "active" && t.status !== "done") ||
         (filter === "today" &&
           t.status !== "done" &&
@@ -150,7 +115,7 @@ export function calendarUrl(todo: Todo) {
       .replace(/\.\d{3}Z$/, "Z");
   const params = new URLSearchParams({
     action: "TEMPLATE",
-    text: "【締切】" + todo.title,
+    text: messages.calendar.eventTitle(todo.title),
     dates: stamp(start) + "/" + stamp(end),
     details: todo.description,
   });
@@ -166,14 +131,19 @@ const record = (x: unknown): x is Record<string, unknown> =>
 const validDate = (x: unknown): x is string =>
   typeof x === "string" && Number.isFinite(Date.parse(x));
 export function parseTodos(raw: string): Todo[] {
-  const data: unknown = JSON.parse(raw);
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(messages.errors.invalidBackup);
+  }
   if (
     !record(data) ||
     data.version !== 1 ||
     !Array.isArray(data.todos) ||
     data.todos.length > 10000
   )
-    throw new Error("対応するバックアップ形式ではありません。");
+    throw new Error(messages.errors.invalidBackup);
   const ids = new Set<string>();
   for (const t of data.todos) {
     if (
@@ -193,7 +163,7 @@ export function parseTodos(raw: string): Todo[] {
       !validDate(t.updatedAt) ||
       !Array.isArray(t.notes)
     )
-      throw new Error("TODOのデータが正しくありません。");
+      throw new Error(messages.errors.invalidTodo);
     ids.add(t.id);
     const noteIds = new Set<string>();
     for (const n of t.notes) {
@@ -208,7 +178,7 @@ export function parseTodos(raw: string): Todo[] {
         !validDate(n.createdAt) ||
         (n.editedAt !== undefined && !validDate(n.editedAt))
       )
-        throw new Error("メモのデータが正しくありません。");
+        throw new Error(messages.errors.invalidNote);
       noteIds.add(n.id);
     }
   }
@@ -258,8 +228,7 @@ export function planRestore(
     });
     todos.push(...incoming.filter((todo) => !oldById.has(todo.id)));
   }
-  if (todos.length > 10000)
-    throw new Error("復元後のTODOは10,000件以内にしてください。");
+  if (todos.length > 10000) throw new Error(messages.errors.tooManyTodos);
   const finalIds = new Set(todos.map((todo) => todo.id));
   const added = todos.filter((todo) => !oldById.has(todo.id)).length;
   const updated = todos.filter((todo) => {

@@ -1,3 +1,4 @@
+import { messages } from "./messages";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -8,7 +9,7 @@ import {
   ChevronRight,
   Circle,
   CircleCheck,
-  Clock3,
+  CalendarClock,
   HardDrive,
   LayoutGrid,
   LoaderCircle,
@@ -17,7 +18,13 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { clockText, FILTER_LABEL, isToday, selectTodos } from "./model";
+import {
+  clockText,
+  FILTER_LABEL,
+  isOverdue,
+  isToday,
+  selectTodos,
+} from "./model";
 import type { Filter, Sort, Todo, TodoDraft } from "./model";
 import { useTodoStore } from "./storage";
 import { DataPanel } from "./DataPanel";
@@ -69,6 +76,7 @@ export default function App() {
   }, [dirty]);
   const counts: Record<Filter, number> = {
     all: todos.length,
+    overdue: todos.filter((todo) => isOverdue(todo, now)).length,
     active: todos.filter((t) => t.status !== "done").length,
     today: todos.filter((t) => t.status !== "done" && isToday(t.deadline, now))
       .length,
@@ -89,13 +97,13 @@ export default function App() {
       setDirty(false);
     }
   }, [view, selected]);
-  async function allowDiscard(action = "破棄して閉じる") {
+  async function allowDiscard(action: string = messages.discard.close) {
     if (!dirty) return true;
     return ask({
-      title: "入力中の内容を破棄しますか？",
-      description: "保存していない入力内容が失われます。",
+      title: messages.discard.title,
+      description: messages.discard.description,
       confirm: action,
-      cancel: "入力を続ける",
+      cancel: messages.discard.keep,
       danger: true,
     });
   }
@@ -131,14 +139,14 @@ export default function App() {
       setFilter("all");
       setDirty(false);
       setView({ type: "detail", id: todo.id });
-      setToast({ message: "TODOを作成しました" });
+      setToast({ message: messages.todo.created });
       return true;
     }
     if (
       selected &&
       update(
         { ...selected, ...draft, updatedAt: timestamp },
-        "変更を保存しました",
+        messages.todo.saved,
       )
     ) {
       setDirty(false);
@@ -150,55 +158,54 @@ export default function App() {
   async function deleteTodo(todo: Todo) {
     if (
       await ask({
-        title: "このTODOを削除しますか？",
-        description:
-          "「" +
-          todo.title +
-          "」と、" +
-          todo.notes.length +
-          "件のメモを削除します。入力中のメモも破棄されます。",
-        confirm: "TODOを削除",
+        title: messages.todo.deleteTitle,
+        description: messages.todo.deleteDescription(
+          todo.title,
+          todo.notes.length,
+        ),
+        confirm: messages.todo.delete,
         danger: true,
       })
     ) {
       if (store.save(todos.filter((t) => t.id !== todo.id))) {
         setView(null);
         setDirty(false);
-        setToast({ message: "TODOを削除しました", undo: todo });
+        setToast({ message: messages.todo.deleted, undo: todo });
       }
     }
   }
-  const filters: { key: Filter; label: string; icon: typeof LayoutGrid }[] = [
-    { key: "all", label: "すべてのTODO", icon: LayoutGrid },
-    { key: "active", label: "未完了", icon: Circle },
-    { key: "today", label: "今日が期限", icon: CalendarDays },
-    { key: "doing", label: "進行中", icon: LoaderCircle },
-    { key: "done", label: "完了", icon: CircleCheck },
+  const filters: { key: Filter; icon: typeof LayoutGrid }[] = [
+    { key: "all", icon: LayoutGrid },
+    { key: "overdue", icon: CalendarClock },
+    { key: "active", icon: Circle },
+    { key: "today", icon: CalendarDays },
+    { key: "doing", icon: LoaderCircle },
+    { key: "done", icon: CircleCheck },
   ];
   return (
     <div className="app-shell">
       <a href="#main" className="skip-link">
-        メインコンテンツへ
+        {messages.app.skipToMain}
       </a>
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand">
             <Mark />
-            <span className="brand-name">TODO</span>
+            <span className="brand-name">{messages.app.title}</span>
           </div>
           <button
             className="mobile-data icon-button"
             onClick={() => {
               setView({ type: "data" });
             }}
-            aria-label="データの保存・復元"
+            aria-label={messages.data.title}
           >
             <HardDrive size={21} />
           </button>
         </div>
-        <nav aria-label="TODOの表示">
+        <nav aria-label={messages.app.navigation}>
           <div className="nav-items">
-            {filters.map(({ key, label, icon: Icon }) => (
+            {filters.map(({ key, icon: Icon }) => (
               <button
                 key={key}
                 className={"nav-item " + (filter === key ? "active" : "")}
@@ -209,7 +216,7 @@ export default function App() {
                 }}
               >
                 <Icon size={19} />
-                <span>{label}</span>
+                <span>{messages.filters.navigation[key]}</span>
                 <span className="nav-count">{counts[key]}</span>
               </button>
             ))}
@@ -223,7 +230,7 @@ export default function App() {
             }}
           >
             <HardDrive size={18} />
-            <span>データの保存・復元</span>
+            <span>{messages.data.title}</span>
             <ChevronRight size={15} />
           </button>
         </div>
@@ -249,8 +256,7 @@ export default function App() {
               fill="#b8d9fa"
             />
           </svg>
-          <div className="clock" aria-label="現在の日時">
-            <Clock3 size={23} />
+          <div className="clock" aria-label={messages.app.currentTime}>
             <time dateTime={now.toISOString()}>{clockText(now)}</time>
           </div>
         </header>
@@ -265,7 +271,7 @@ export default function App() {
                     className="text-button"
                     onClick={() => setView({ type: "data" })}
                   >
-                    データの保存・復元を開く
+                    {messages.data.open}
                     <ArrowRight size={14} />
                   </button>
                 )}
@@ -283,7 +289,7 @@ export default function App() {
               disabled={!!store.recovery}
             >
               <Plus size={19} />
-              新しいTODO
+              {messages.todo.create}
             </button>
           </div>
           <section className="todo-section" aria-labelledby="list-heading">
@@ -291,12 +297,12 @@ export default function App() {
               <div className="search-wrap">
                 <Search size={18} />
                 <label htmlFor="todo-search" className="sr-only">
-                  TODO・メモを検索
+                  {messages.search.label}
                 </label>
                 <input
                   id="todo-search"
                   type="search"
-                  placeholder="TODO・メモを検索"
+                  placeholder={messages.search.label}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -304,7 +310,7 @@ export default function App() {
                   <button
                     className="icon-button"
                     onClick={() => setSearch("")}
-                    aria-label="検索をクリア"
+                    aria-label={messages.search.clear}
                   >
                     <X size={17} />
                   </button>
@@ -312,14 +318,18 @@ export default function App() {
               </div>
               <div className="sort-wrap">
                 <ArrowDownUp size={17} />
-                <label htmlFor="todo-sort">並べ替え</label>
+                <label htmlFor="todo-sort">{messages.search.sort}</label>
                 <select
                   id="todo-sort"
                   value={sort}
                   onChange={(e) => setSort(e.target.value as Sort)}
                 >
-                  <option value="deadline">期限が近い順</option>
-                  <option value="priority">優先度が高い順</option>
+                  <option value="deadline">
+                    {messages.search.deadlineOrder}
+                  </option>
+                  <option value="priority">
+                    {messages.search.priorityOrder}
+                  </option>
                 </select>
               </div>
             </div>
@@ -340,7 +350,9 @@ export default function App() {
               </div>
             ) : (
               <div className="empty-state">
-                <p>{search ? "検索結果なし" : "TODOなし"}</p>
+                <p>
+                  {search ? messages.filters.noResults : messages.filters.empty}
+                </p>
                 {!todos.length ? (
                   <button
                     className="button button-primary"
@@ -348,7 +360,7 @@ export default function App() {
                     disabled={!!store.recovery}
                   >
                     <Plus size={18} />
-                    TODOを作成
+                    {messages.todo.createAction}
                   </button>
                 ) : (
                   <button
@@ -358,7 +370,7 @@ export default function App() {
                       setFilter("all");
                     }}
                   >
-                    すべてのTODOを見る
+                    {messages.filters.showAll}
                   </button>
                 )}
               </div>
@@ -367,7 +379,11 @@ export default function App() {
         </main>
       </div>
       {view?.type === "create" && (
-        <Modal title="新しいTODO" onClose={closeView} notice={toast?.message}>
+        <Modal
+          title={messages.todo.create}
+          onClose={closeView}
+          notice={toast?.message}
+        >
           {store.error && (
             <p className="modal-error" role="alert">
               {store.error}
@@ -382,7 +398,11 @@ export default function App() {
         </Modal>
       )}
       {view?.type === "edit" && selected && (
-        <Modal title="TODOを編集" onClose={closeView} notice={toast?.message}>
+        <Modal
+          title={messages.todo.edit}
+          onClose={closeView}
+          notice={toast?.message}
+        >
           {store.error && (
             <p className="modal-error" role="alert">
               {store.error}
@@ -394,7 +414,7 @@ export default function App() {
             setDeadline={view.setDeadline}
             onSave={saveDraft}
             onCancel={async () => {
-              if (await allowDiscard("破棄して詳細に戻る")) {
+              if (await allowDiscard(messages.discard.detail)) {
                 setDirty(false);
                 setView({ type: "detail", id: selected.id });
               }
@@ -423,7 +443,7 @@ export default function App() {
             onUpdate={update}
             onDirty={setDirty}
             onEdit={async (setDeadline = false) => {
-              if (await allowDiscard("破棄して編集する")) {
+              if (await allowDiscard(messages.discard.edit)) {
                 setDirty(false);
                 setView({ type: "edit", id: selected.id, setDeadline });
               }
@@ -434,7 +454,7 @@ export default function App() {
       )}
       {view?.type === "data" && (
         <Modal
-          title="データの保存・復元"
+          title={messages.data.title}
           onClose={closeView}
           notice={toast?.message}
         >
@@ -447,10 +467,8 @@ export default function App() {
             <div className="data-notice">
               <LockKeyhole size={21} />
               <div>
-                <h3>保存先：このブラウザ</h3>
-                <p>
-                  ブラウザのサイトデータを削除すると、TODOとメモも消去されます。
-                </p>
+                <h3>{messages.data.location}</h3>
+                <p>{messages.data.storageNotice}</p>
               </div>
             </div>
             <DataPanel
@@ -466,30 +484,27 @@ export default function App() {
             />
             {store.recovery && (
               <div className="recovery-section">
-                <h3>読み込めないデータを初期化</h3>
-                <p>
-                  先に書き出しを行ってください。初期化すると、現在の保存データは削除されます。
-                </p>
+                <h3>{messages.data.recovery.title}</h3>
+                <p>{messages.data.recovery.description}</p>
                 <button
                   className="button button-danger"
                   onClick={async () => {
                     if (
                       await ask({
-                        title: "保存データを初期化しますか？",
-                        description:
-                          "この操作で保存されているTODOとメモをすべて削除します。元に戻せません。",
-                        confirm: "初期化する",
+                        title: messages.data.recovery.confirmTitle,
+                        description: messages.data.recovery.confirmDescription,
+                        confirm: messages.data.recovery.confirm,
                         danger: true,
                       })
                     ) {
                       if (store.save([], true)) {
                         setView(null);
-                        setToast({ message: "保存データを初期化しました" });
+                        setToast({ message: messages.data.recovery.done });
                       }
                     }
                   }}
                 >
-                  保存データを初期化
+                  {messages.data.recovery.action}
                 </button>
               </div>
             )}
@@ -516,7 +531,7 @@ export default function App() {
                   setConfirmation(null);
                 }}
               >
-                {confirmation.cancel ?? "キャンセル"}
+                {confirmation.cancel ?? messages.common.cancel}
               </button>
               <button
                 className={
@@ -555,16 +570,16 @@ export default function App() {
                     !todos.some((t) => t.id === toast.undo!.id) &&
                     store.save([...todos, toast.undo])
                   )
-                    setToast({ message: "TODOを元に戻しました" });
+                    setToast({ message: messages.todo.restored });
                 }}
               >
-                元に戻す
+                {messages.common.undo}
               </button>
             )}
             <button
               className="icon-button"
               onClick={() => setToast(null)}
-              aria-label="通知を閉じる"
+              aria-label={messages.common.closeNotification}
             >
               <X size={16} />
             </button>
