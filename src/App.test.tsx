@@ -27,6 +27,7 @@ beforeEach(() => {
     },
   });
   Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.scrollTo = vi.fn();
 });
 afterEach(() => {
   cleanup();
@@ -91,7 +92,7 @@ describe("利用者の操作", () => {
       }),
     ).toBeTruthy();
     expect(
-      screen.queryByRole("link", { name: /Googleカレンダーに追加/ }),
+      screen.queryByRole("link", { name: /Googleカレンダーに登録/ }),
     ).toBeNull();
   });
   it("期限を持つTODOを作成し、登録用リンクを表示する", async () => {
@@ -108,7 +109,7 @@ describe("利用者の操作", () => {
       }),
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    const link = screen.getByRole("link", { name: /Googleカレンダーに追加/ });
+    const link = screen.getByRole("link", { name: /Googleカレンダーに登録/ });
     expect(link.getAttribute("target")).toBe("_blank");
     expect(new URL(link.getAttribute("href")!).searchParams.get("text")).toBe(
       "【締切】レポートを提出",
@@ -117,38 +118,108 @@ describe("利用者の操作", () => {
       parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].deadline,
     ).not.toBeNull();
   });
-  it("進捗メモを保存し、アプリを開き直しても残り、編集できる", async () => {
+  it("メモをチャットとして追記し、名前・送信日時とともに永続化する。編集・削除操作はない", async () => {
     seed();
     const user = userEvent.setup();
     const initial = render(<App />);
     await user.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    await user.type(screen.getByLabelText("メモを残す"), "一覧画面までできた");
-    await user.click(screen.getByRole("button", { name: "メモを保存" }));
-    expect(
-      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes[0].text,
-    ).toBe("一覧画面までできた");
-    expect(screen.getByLabelText("メモを残す")).toHaveProperty("value", "");
+    const input = screen.getByRole("textbox", { name: "メモを入力" });
+    expect(screen.getByRole("button", { name: "送信" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await user.type(input, "一覧画面までできた");
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    expect(input).toHaveProperty("value", "");
+    await user.type(input, "モーダルも完成");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    const stored = parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes;
+    expect(stored.map((n) => n.text)).toEqual([
+      "一覧画面までできた",
+      "モーダルも完成",
+    ]);
     initial.unmount();
     render(<App />);
     await user.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    const detail = screen.getByRole("dialog");
-    expect(within(detail).getByText("一覧画面までできた")).toBeTruthy();
+    const thread = screen.getByRole("list", { name: "メモの履歴" });
+    const messages = within(thread).getAllByRole("listitem");
+    expect(messages).toHaveLength(2);
+    for (let i = 0; i < messages.length; i++) {
+      expect(within(messages[i]).getByText("自分")).toBeTruthy();
+      expect(messages[i].querySelector("time")?.getAttribute("dateTime")).toBe(
+        stored[i].createdAt,
+      );
+      expect(within(messages[i]).getByText(stored[i].text)).toBeTruthy();
+    }
+    expect(screen.queryByRole("button", { name: "メモを編集" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "メモを削除" })).toBeNull();
+  });
+  it("未送信メモを閉じる前に確認し、入力を続けられる", async () => {
+    seed();
+    const user = userEvent.setup();
+    render(<App />);
     await user.click(
-      within(detail).getByRole("button", { name: "メモを編集" }),
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    await user.clear(screen.getByRole("textbox", { name: "メモを編集" }));
     await user.type(
-      screen.getByRole("textbox", { name: "メモを編集" }),
-      "一覧とモーダルが完成",
+      screen.getByRole("textbox", { name: "メモを入力" }),
+      "送信前のメモ",
     );
-    await user.click(screen.getByRole("button", { name: "保存する" }));
-    const saved = parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes[0];
-    expect(saved.text).toBe("一覧とモーダルが完成");
-    expect(saved.editedAt).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "閉じる" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "入力を続ける",
+      }),
+    );
+    expect(screen.getByRole("textbox", { name: "メモを入力" })).toHaveProperty(
+      "value",
+      "送信前のメモ",
+    );
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes,
+    ).toHaveLength(0);
+  });
+  it("期限なしの場合はカレンダー操作から期限の編集へ進める", async () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeTodos([{ ...task(), deadline: null }]),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    expect(
+      screen.queryByRole("link", { name: /Googleカレンダーに登録/ }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "TODOを編集" }));
+    expect(screen.getByLabelText("期限を設定しない")).toHaveProperty(
+      "checked",
+      true,
+    );
+    await user.click(screen.getByRole("button", { name: "キャンセル" }));
+    await user.click(screen.getByRole("button", { name: "期限を設定" }));
+    expect(screen.getByLabelText("期限を設定しない")).toHaveProperty(
+      "checked",
+      false,
+    );
+    expect(screen.getByLabelText("期限")).toBeTruthy();
+  });
+  it("キャッチコピーやサンプル操作を表示しない", () => {
+    render(<App />);
+    for (const copy of [
+      "今日も、ひとつずつ。",
+      "やることと、その続き。",
+      "ONE STEP AT A TIME",
+      "小さな一歩も、",
+      "マイワークスペース",
+    ])
+      expect(screen.queryByText(copy)).toBeNull();
+    expect(screen.queryByRole("button", { name: /サンプル/ })).toBeNull();
   });
   it("入力中のフォームを閉じる前に確認し、続けると入力を残す", async () => {
     const user = userEvent.setup();
@@ -181,21 +252,21 @@ describe("利用者の操作", () => {
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
     await user.type(
-      screen.getByLabelText("メモを残す"),
+      screen.getByLabelText("メモを入力"),
       "保存できないときも残る",
     );
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("quota", "QuotaExceededError");
     });
-    await user.click(screen.getByRole("button", { name: "メモを保存" }));
-    expect(screen.getByLabelText("メモを残す")).toHaveProperty(
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    expect(screen.getByLabelText("メモを入力")).toHaveProperty(
       "value",
       "保存できないときも残る",
     );
     expect(
       within(screen.getByRole("dialog")).getByRole("alert").textContent,
     ).toContain("保存できませんでした");
-    expect(screen.queryByText("メモを保存しました")).toBeNull();
+    expect(screen.queryByText("送信しました")).toBeNull();
     expect(
       parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes,
     ).toHaveLength(0);

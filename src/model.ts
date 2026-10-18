@@ -152,10 +152,7 @@ export function calendarUrl(todo: Todo) {
     action: "TEMPLATE",
     text: "【締切】" + todo.title,
     dates: stamp(start) + "/" + stamp(end),
-    details:
-      todo.description +
-      (todo.description ? "\n\n" : "") +
-      "ひとつずつに登録したTODOの締切です。",
+    details: todo.description,
   });
   return (
     "https://calendar.google.com/calendar/r/eventedit?" + params.toString()
@@ -216,55 +213,4 @@ export function parseTodos(raw: string): Todo[] {
     }
   }
   return data.todos as Todo[];
-}
-export function sampleTodos(now: Date): Todo[] {
-  const deadline = (days: number, hour: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() + days);
-    d.setHours(hour, 0, 0, 0);
-    return d.toISOString();
-  };
-  const timestamp = now.toISOString();
-  return [
-    {
-      id: crypto.randomUUID(),
-      title: "プログラミングの課題を仕上げる",
-      description:
-        "カードを開いて、説明や進捗メモを確認してみましょう。これは使い方を試すためのサンプルTODOです。",
-      priority: "high",
-      status: "doing",
-      deadline: deadline(1, 23),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      notes: [
-        {
-          id: crypto.randomUUID(),
-          text: "基本の画面ができた。次は操作をひとつずつ確認する。",
-          createdAt: timestamp,
-        },
-      ],
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "読みかけの本を読み進める",
-      description: "少しずつでも大丈夫。進んだところをメモに残す。",
-      priority: "medium",
-      status: "todo",
-      deadline: deadline(3, 20),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      notes: [],
-    },
-    {
-      id: crypto.randomUUID(),
-      title: "気になっているアイデアをまとめる",
-      description: "期限を決めずに、思いついたことをストックする。",
-      priority: "low",
-      status: "todo",
-      deadline: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      notes: [],
-    },
-  ];
 }

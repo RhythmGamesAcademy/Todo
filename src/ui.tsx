@@ -7,17 +7,18 @@ import {
   Check,
   CheckCheck,
   Circle,
-  Clock3,
+  ArrowUp,
+  UserRound,
   Flag,
   MessageSquare,
   Pencil,
   Plus,
-  Send,
   Trash2,
   X,
 } from "lucide-react";
 import {
   calendarUrl,
+  clockText,
   dateText,
   isOverdue,
   isToday,
@@ -26,11 +27,15 @@ import {
   toDateInput,
 } from "./model";
 import type { Note, Priority, Status, Todo, TodoDraft } from "./model";
-export function Mark({ small = false }: { small?: boolean }) {
+export function Mark() {
   return (
-    <span className={"brand-mark " + (small ? "small" : "")} aria-hidden="true">
-      <Check size={small ? 20 : 26} strokeWidth={2.5} />
-    </span>
+    <img
+      className="brand-mark"
+      src="./favicon.svg"
+      alt=""
+      width={44}
+      height={44}
+    />
   );
 }
 export function Modal({
@@ -132,9 +137,7 @@ export function TodoCard({
         </span>
       </div>
       <h3>{todo.title}</h3>
-      <p className="card-description line-clamp-2">
-        {todo.description || "説明はまだありません。詳細から追加できます。"}
-      </p>
+      <p className="card-description line-clamp-2">{todo.description}</p>
       <div className={"card-date " + (overdue ? "overdue" : "")}>
         <CalendarDays size={15} />
         <span>
@@ -151,12 +154,12 @@ export function TodoCard({
           <span className="due-label today-label">今日</span>
         ) : null}
       </div>
-      <div className="card-note">
-        <MessageSquare size={15} />
-        <span className="line-clamp-1">
-          {latest ? latest.text : "進んだことをメモに残そう"}
-        </span>
-      </div>
+      {latest && (
+        <div className="card-note">
+          <MessageSquare size={15} />
+          <span className="line-clamp-1">{latest.text}</span>
+        </div>
+      )}
       <div className="card-footer">
         <span>{todo.notes.length}件のメモ</span>
         <span className="card-open">
@@ -169,12 +172,14 @@ export function TodoCard({
 }
 export function TodoForm({
   todo,
+  setDeadline: focusDeadline = false,
   onSave,
   onCancel,
   onDirty,
   ask,
 }: {
   todo?: Todo;
+  setDeadline?: boolean;
   onSave: (draft: TodoDraft) => boolean;
   onCancel: () => void;
   onDirty: (dirty: boolean) => void;
@@ -183,7 +188,7 @@ export function TodoForm({
   const [title, setTitle] = useState(todo?.title ?? "");
   const [description, setDescription] = useState(todo?.description ?? "");
   const [noDeadline, setNoDeadline] = useState(
-    todo ? todo.deadline === null : false,
+    todo ? todo.deadline === null && !focusDeadline : false,
   );
   const [deadline, setDeadline] = useState(
     todo?.deadline ? toDateInput(todo.deadline) : "",
@@ -251,7 +256,7 @@ export function TodoForm({
         タイトル<span className="required">必須</span>
       </label>
       <input
-        autoFocus
+        autoFocus={!focusDeadline}
         id="todo-title"
         value={title}
         onChange={(e) => {
@@ -260,7 +265,7 @@ export function TodoForm({
         }}
         maxLength={120}
         required
-        placeholder="何をしますか？"
+        placeholder="タイトル"
         className="field title-input"
       />
       <div className="field-heading">
@@ -275,7 +280,7 @@ export function TodoForm({
         onChange={(e) => setDescription(e.target.value)}
         maxLength={2000}
         rows={3}
-        placeholder="やることの詳細や、覚えておきたいこと"
+        placeholder="説明"
         className="field"
       />
       <div className="field-heading">
@@ -294,11 +299,12 @@ export function TodoForm({
       {noDeadline ? (
         <div className="inline-notice">
           <CalendarDays size={17} />
-          <span>期限なしで作成します。あとから設定できます。</span>
+          <span>期限なし</span>
         </div>
       ) : (
         <>
           <input
+            autoFocus={focusDeadline}
             id="todo-deadline"
             type="datetime-local"
             className="field"
@@ -309,9 +315,6 @@ export function TodoForm({
             }}
             required
           />
-          <p className="field-hint">
-            この端末の時刻で設定します。期限を過ぎたTODOも登録できます。
-          </p>
         </>
       )}
       <fieldset className="priority-field">
@@ -395,102 +398,74 @@ export function TodoDetail({
   onEdit,
   onDelete,
   onDirty,
-  ask,
 }: {
   todo: Todo;
   now: Date;
   onUpdate: (todo: Todo, message: string) => boolean;
-  onEdit: () => void;
+  onEdit: (setDeadline?: boolean) => void;
   onDelete: () => void;
   onDirty: (dirty: boolean) => void;
-  ask: (options: AskOptions) => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editText, setEditText] = useState("");
-  const notesEnd = useRef<HTMLDivElement>(null);
+  const thread = useRef<HTMLOListElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const [shouldScroll, setShouldScroll] = useState(false);
-  const original = todo.notes.find((n) => n.id === editingId)?.text ?? "";
-  const dirty = !!text.trim() || (editingId !== null && editText !== original);
+  const scrollAfterSend = useRef(true);
   useEffect(() => {
-    onDirty(dirty);
-  }, [dirty, onDirty]);
+    onDirty(!!text.trim());
+  }, [text, onDirty]);
   useEffect(() => {
-    if (shouldScroll) {
-      notesEnd.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
+    if (scrollAfterSend.current && thread.current) {
+      thread.current.scrollTo({
+        top: thread.current.scrollHeight,
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
+          .matches
+          ? "auto"
+          : "smooth",
       });
-      setShouldScroll(false);
+      scrollAfterSend.current = false;
     }
-  }, [todo.notes, shouldScroll]);
+  }, [todo.notes]);
   const url = calendarUrl(todo);
-  const overdue = isOverdue(todo, now);
-  function updateNotes(notes: Note[], message: string) {
-    return onUpdate(
-      { ...todo, notes, updatedAt: new Date().toISOString() },
-      message,
-    );
-  }
-  function post(e: FormEvent) {
-    e.preventDefault();
+  function post(e?: FormEvent) {
+    e?.preventDefault();
     if (!text.trim()) return;
+    const note: Note = {
+      id: crypto.randomUUID(),
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+    };
     if (
-      updateNotes(
-        [
-          ...todo.notes,
-          {
-            id: crypto.randomUUID(),
-            text: text.trim(),
-            createdAt: new Date().toISOString(),
-          },
-        ],
-        "メモを保存しました",
+      onUpdate(
+        { ...todo, notes: [...todo.notes, note], updatedAt: note.createdAt },
+        "送信しました",
       )
     ) {
+      scrollAfterSend.current = true;
       setText("");
-      setShouldScroll(true);
       composer.current?.focus();
     }
   }
-  async function editNote(note: Note) {
-    if (
-      editingId &&
-      editText !== original &&
-      !(await ask({
-        title: "編集中のメモを破棄しますか？",
-        description: "保存していないメモの変更が失われます。",
-        confirm: "変更を破棄",
-        cancel: "編集を続ける",
-        danger: true,
-      }))
-    )
-      return;
-    setEditingId(note.id);
-    setEditText(note.text);
-  }
   return (
     <div className="detail-content">
-      <section className="detail-overview">
-        <div className="flex items-center gap-3 flex-wrap">
+      <section className="detail-overview" aria-label="TODOの内容">
+        <div className="detail-meta">
           <span className={"priority priority-" + todo.priority}>
-            <Flag size={14} />
+            <Flag size={15} />
             優先度 {PRIORITY[todo.priority]}
           </span>
-          <span className={"detail-due " + (overdue ? "overdue" : "")}>
+          <span
+            className={"detail-due " + (isOverdue(todo, now) ? "overdue" : "")}
+          >
             <CalendarDays size={16} />
             {todo.deadline ? dateText(todo.deadline, true) : "期限なし"}
-            {overdue && <strong>期限超過</strong>}
+            {isOverdue(todo, now) && <strong>期限超過</strong>}
           </span>
         </div>
-        <p
-          className={"detail-description " + (!todo.description ? "muted" : "")}
-        >
-          {todo.description || "説明はまだありません。編集から追加できます。"}
-        </p>
+        {todo.description && (
+          <p className="detail-description">{todo.description}</p>
+        )}
         <div className="detail-controls">
-          <div>
+          <div className="status-control">
             <label className="field-label" htmlFor="detail-status">
               状態
             </label>
@@ -516,215 +491,107 @@ export function TodoDetail({
               ))}
             </select>
           </div>
-          <button className="button button-secondary" onClick={onEdit}>
+          <button className="button button-secondary" onClick={() => onEdit()}>
             <Pencil size={16} />
             TODOを編集
           </button>
         </div>
-        <div className="calendar-box">
-          {url ? (
-            <>
-              <a
-                className="calendar-link"
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <CalendarDays size={17} />
-                Googleカレンダーに追加
-                <ArrowUpRight size={16} />
-              </a>
-              <p>
-                別タブで締切の予定を開きます。最後に保存してください。
-                <br />
-                締切時刻から15分間の予定です。変更の自動同期はありません。
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="calendar-unavailable">
-                <CalendarDays size={17} />
-                Googleカレンダーへの追加
-              </div>
-              <p>期限を設定すると、締切の予定を追加できます。</p>
-              <button className="text-button" onClick={onEdit}>
-                期限を設定する
-                <ArrowUpRight size={14} />
-              </button>
-            </>
-          )}
-        </div>
       </section>
-      <section className="notes-section" aria-labelledby="notes-heading">
-        <div className="notes-heading">
-          <h3 id="notes-heading">
-            <MessageSquare size={19} />
-            進捗メモ<span>{todo.notes.length}</span>
-          </h3>
-          <span>ここまでと、これから。</span>
+      <section className="chat" aria-labelledby="notes-heading">
+        <div className="chat-heading">
+          <h3 id="notes-heading">メモ</h3>
+          <span>{todo.notes.length}</span>
         </div>
-        {todo.notes.length === 0 ? (
-          <div className="notes-empty">
-            <span className="note-empty-icon">
-              <MessageSquare size={23} />
-            </span>
-            <p>小さな進捗も、残しておこう。</p>
-            <span>
-              「資料を読み終えた」「次はここから」など、自由にどうぞ。
-            </span>
-          </div>
-        ) : (
-          <ol className="note-list">
-            {todo.notes.map((note) => (
-              <li key={note.id} className="note-item">
-                <div className="note-top">
-                  <time dateTime={note.createdAt}>
-                    {dateText(note.createdAt, true)}
-                    {note.editedAt && <span> · 編集済み</span>}
-                  </time>
-                  <div className="note-actions">
-                    <button
-                      className="icon-button"
-                      aria-label="メモを編集"
-                      onClick={() => editNote(note)}
-                    >
-                      <Pencil size={15} />
-                    </button>
-                    <button
-                      className="icon-button danger-icon"
-                      aria-label="メモを削除"
-                      onClick={async () => {
-                        if (
-                          await ask({
-                            title: "このメモを削除しますか？",
-                            description: "削除したメモは元に戻せません。",
-                            confirm: "メモを削除",
-                            danger: true,
-                          })
-                        ) {
-                          if (
-                            updateNotes(
-                              todo.notes.filter((n) => n.id !== note.id),
-                              "メモを削除しました",
-                            ) &&
-                            editingId === note.id
-                          )
-                            setEditingId(null);
-                        }
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-                {editingId === note.id ? (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (
-                        editText.trim() &&
-                        updateNotes(
-                          todo.notes.map((n) =>
-                            n.id === note.id
-                              ? {
-                                  ...n,
-                                  text: editText.trim(),
-                                  editedAt: new Date().toISOString(),
-                                }
-                              : n,
-                          ),
-                          "メモを更新しました",
-                        )
-                      )
-                        setEditingId(null);
-                    }}
-                  >
-                    <label className="sr-only" htmlFor="edit-note">
-                      メモを編集
-                    </label>
-                    <textarea
-                      autoFocus
-                      id="edit-note"
-                      className="field"
-                      rows={3}
-                      maxLength={2000}
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      required
-                    />
-                    <div className="note-edit-actions">
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={async () => {
-                          if (
-                            editText === original ||
-                            (await ask({
-                              title: "メモの変更を破棄しますか？",
-                              description: "保存前の内容に戻ります。",
-                              confirm: "変更を破棄",
-                              cancel: "編集を続ける",
-                            }))
-                          )
-                            setEditingId(null);
-                        }}
-                      >
-                        キャンセル
-                      </button>
-                      <button
-                        type="submit"
-                        className="button button-primary button-small"
-                        disabled={!editText.trim()}
-                      >
-                        保存する
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <p className="note-text">{note.text}</p>
-                )}
-              </li>
-            ))}
-          </ol>
-        )}
-        <div ref={notesEnd} />
-        <form className="note-composer" onSubmit={post}>
-          <label className="field-label" htmlFor="new-note">
-            メモを残す
+        <ol
+          ref={thread}
+          className="chat-thread"
+          aria-label="メモの履歴"
+          tabIndex={todo.notes.length ? 0 : undefined}
+        >
+          {todo.notes.map((note) => (
+            <li key={note.id} className="chat-message">
+              <span className="avatar" aria-hidden="true">
+                <UserRound size={21} strokeWidth={1.7} />
+              </span>
+              <div className="message-content">
+                <span className="message-name">自分</span>
+                <time className="message-time" dateTime={note.createdAt}>
+                  {clockText(new Date(note.createdAt))}
+                </time>
+                <p className="message-text">{note.text}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <form className="chat-composer" onSubmit={post}>
+          <label htmlFor="new-note" className="sr-only">
+            メモを入力
           </label>
           <textarea
             ref={composer}
             id="new-note"
-            className="field"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="進んだこと、次にやること…"
+            placeholder="メモを入力"
             maxLength={2000}
-            rows={3}
+            rows={2}
+            onKeyDown={(e) => {
+              if (
+                (e.ctrlKey || e.metaKey) &&
+                e.key === "Enter" &&
+                !e.nativeEvent.isComposing
+              ) {
+                e.preventDefault();
+                post();
+              }
+            }}
           />
-          <div className="composer-bottom">
-            <span>{text.length} / 2000</span>
+          <div className="composer-actions">
+            <span className="char-count">{text.length} / 2000</span>
             <button
               type="submit"
-              className="button button-primary button-small"
+              className="send-button"
               disabled={!text.trim()}
+              aria-label="送信"
+              title="送信（Ctrl+Enter / ⌘+Enter）"
             >
-              <Send size={15} />
-              メモを保存
+              <ArrowUp size={20} />
             </button>
           </div>
         </form>
       </section>
-      <div className="detail-bottom">
-        <span>
-          <Clock3 size={13} />
-          作成：{dateText(todo.createdAt, true)}
-        </span>
+      <footer className="detail-footer">
         <button className="text-button danger-text" onClick={onDelete}>
-          <Trash2 size={15} />
+          <Trash2 size={16} />
           TODOを削除
         </button>
-      </div>
+        <div className="calendar-action">
+          {url ? (
+            <a
+              className="button button-primary"
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Googleカレンダーに登録（別タブで開く）"
+            >
+              <CalendarDays size={17} />
+              Googleカレンダーに登録
+              <ArrowUpRight size={15} />
+            </a>
+          ) : (
+            <>
+              <span className="calendar-reason">期限未設定</span>
+              <button
+                className="button button-secondary"
+                onClick={() => onEdit(true)}
+              >
+                <CalendarDays size={17} />
+                期限を設定
+              </button>
+            </>
+          )}
+        </div>
+      </footer>
     </div>
   );
 }

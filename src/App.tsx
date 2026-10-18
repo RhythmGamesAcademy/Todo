@@ -5,20 +5,17 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
-  CheckCheck,
   ChevronRight,
   Circle,
   CircleCheck,
   Clock3,
   Download,
-  FolderOpen,
   HardDrive,
   LayoutGrid,
   LoaderCircle,
   LockKeyhole,
   Plus,
   Search,
-  ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
@@ -27,7 +24,6 @@ import {
   FILTER_LABEL,
   isToday,
   parseTodos,
-  sampleTodos,
   selectTodos,
   serializeTodos,
 } from "./model";
@@ -37,7 +33,7 @@ import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
 type View =
   | { type: "create" }
-  | { type: "detail" | "edit"; id: string }
+  | { type: "detail" | "edit"; id: string; setDeadline?: boolean }
   | { type: "data" }
   | null;
 type Confirm = AskOptions & { resolve: (answer: boolean) => void };
@@ -108,9 +104,6 @@ export default function App() {
     view && (view.type === "detail" || view.type === "edit")
       ? todos.find((t) => t.id === view.id)
       : undefined;
-  const percent = todos.length
-    ? Math.round((counts.done / todos.length) * 100)
-    : 0;
   useEffect(() => {
     if (view && (view.type === "detail" || view.type === "edit") && !selected) {
       setView(null);
@@ -248,12 +241,7 @@ export default function App() {
         <div className="sidebar-top">
           <div className="brand">
             <Mark />
-            <div>
-              <span className="brand-name">
-                ひとつずつ<span className="brand-period">.</span>
-              </span>
-              <span className="brand-caption">やることと、その続き。</span>
-            </div>
+            <span className="brand-name">TODO</span>
           </div>
           <button
             className="mobile-data icon-button"
@@ -266,7 +254,6 @@ export default function App() {
             <HardDrive size={21} />
           </button>
         </div>
-        <div className="nav-label">マイTODO</div>
         <nav aria-label="TODOの表示">
           <div className="nav-items">
             {filters.map(({ key, label, icon: Icon }) => (
@@ -287,17 +274,6 @@ export default function App() {
           </div>
         </nav>
         <div className="sidebar-bottom">
-          <div className="little-note">
-            <span className="little-note-symbol" aria-hidden="true">
-              “
-            </span>
-            <p>
-              小さな一歩も、
-              <br />
-              ちゃんと前進。
-            </p>
-            <span>今日の続きを、メモに残そう。</span>
-          </div>
           <button
             className="storage-nav"
             onClick={() => {
@@ -309,20 +285,12 @@ export default function App() {
             <span>データの保存・復元</span>
             <ChevronRight size={15} />
           </button>
-          <p className="local-caption">
-            <LockKeyhole size={12} />
-            データはこのブラウザに保存
-          </p>
         </div>
       </aside>
       <div className="workspace">
         <header className="topbar">
-          <div className="workspace-label">
-            <span className="workspace-dot" />
-            マイワークスペース
-          </div>
           <div className="clock" aria-label="現在の日時">
-            <Clock3 size={15} />
+            <Clock3 size={23} />
             <time dateTime={now.toISOString()}>{clockText(now)}</time>
           </div>
         </header>
@@ -345,75 +313,20 @@ export default function App() {
             </div>
           )}
           <div className="page-heading">
-            <div>
-              <p className="eyebrow">ONE STEP AT A TIME</p>
-              <h1>今日も、ひとつずつ。</h1>
-              <p className="page-intro">
-                やることを整理して、進んだことを残そう。
-              </p>
-            </div>
+            <h1 id="list-heading">
+              {FILTER_LABEL[filter]}
+              <span className="heading-count">{visible.length}</span>
+            </h1>
             <button
               className="button button-primary create-button"
               onClick={openCreate}
               disabled={!!store.recovery}
             >
-              <Plus size={20} />
+              <Plus size={19} />
               新しいTODO
             </button>
           </div>
-          <section className="overview" aria-label="TODOの進捗">
-            <div className="overview-main">
-              <span className="overview-icon">
-                <Check size={23} />
-              </span>
-              <div>
-                <p>いま、やること</p>
-                <div className="overview-number">
-                  {counts.active}
-                  <span>件</span>
-                  <span className="overview-number-copy">
-                    ひとつずつ、進めていこう。
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="overview-stats">
-              <div className="today-stat">
-                <span>今日が期限</span>
-                <strong>
-                  {counts.today}
-                  <small> 件</small>
-                </strong>
-              </div>
-              <div className="progress-stat">
-                <div>
-                  <span>完了したTODO</span>
-                  <strong>
-                    {counts.done}
-                    <small> / {todos.length}</small>
-                  </strong>
-                </div>
-                <div
-                  className="progress-track"
-                  role="progressbar"
-                  aria-valuenow={percent}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="TODO完了率"
-                >
-                  <span style={{ width: percent + "%" }} />
-                </div>
-              </div>
-            </div>
-          </section>
           <section className="todo-section" aria-labelledby="list-heading">
-            <div className="list-heading">
-              <h2 id="list-heading">
-                {FILTER_LABEL[filter]}
-                <span>{visible.length}</span>
-              </h2>
-              <span className="list-helper">カードを開いて、続きをメモ。</span>
-            </div>
             <div className="toolbar">
               <div className="search-wrap">
                 <Search size={18} />
@@ -438,7 +351,7 @@ export default function App() {
                 )}
               </div>
               <div className="sort-wrap">
-                <ArrowDownUp size={16} />
+                <ArrowDownUp size={17} />
                 <label htmlFor="todo-sort">並べ替え</label>
                 <select
                   id="todo-sort"
@@ -467,121 +380,34 @@ export default function App() {
               </div>
             ) : (
               <div className="empty-state">
-                {todos.length === 0 ? (
-                  <>
-                    <div className="empty-illustration" aria-hidden="true">
-                      <span className="paper">
-                        <span className="paper-row">
-                          <i className="paper-check">
-                            <Check size={13} />
-                          </i>
-                          <i />
-                        </span>
-                        <span className="paper-row">
-                          <i className="paper-check" />
-                          <i />
-                        </span>
-                        <span className="paper-row">
-                          <i className="paper-check" />
-                          <i />
-                        </span>
-                      </span>
-                      <span className="paper-bubble">
-                        <Plus size={25} />
-                      </span>
-                      <span className="paper-dot" />
-                    </div>
-                    <p className="empty-overline">まずは、ひとつから。</p>
-                    <h3>最初のTODOを作ってみよう。</h3>
-                    <p>
-                      やることも、途中のメモも、ここにまとめて。
-                      <br />
-                      あなたのペースで、少しずつ進めましょう。
-                    </p>
-                    <button
-                      className="button button-primary"
-                      onClick={openCreate}
-                      disabled={!!store.recovery}
-                    >
-                      <Plus size={18} />
-                      TODOを作成
-                    </button>
-                    <button
-                      className="text-button sample-button"
-                      disabled={!!store.recovery}
-                      onClick={() => {
-                        if (store.save(sampleTodos(new Date())))
-                          setToast({
-                            message:
-                              "サンプルTODOを3件追加しました。自由に編集・削除できます",
-                          });
-                      }}
-                    >
-                      サンプルで使い方を試す
-                      <ArrowRight size={15} />
-                    </button>
-                  </>
+                <p>{search ? "検索結果なし" : "TODOなし"}</p>
+                {!todos.length ? (
+                  <button
+                    className="button button-primary"
+                    onClick={openCreate}
+                    disabled={!!store.recovery}
+                  >
+                    <Plus size={18} />
+                    TODOを作成
+                  </button>
                 ) : (
-                  <>
-                    <span className="filtered-empty-icon">
-                      {search ? (
-                        <Search size={28} />
-                      ) : filter === "done" ? (
-                        <CheckCheck size={28} />
-                      ) : (
-                        <FolderOpen size={28} />
-                      )}
-                    </span>
-                    <h3>
-                      {search
-                        ? "一致するTODOはありません。"
-                        : filter === "today"
-                          ? "今日が期限のTODOはありません。"
-                          : filter === "done"
-                            ? "完了したTODOはまだありません。"
-                            : filter === "active"
-                              ? "未完了のTODOはありません。"
-                              : "進行中のTODOはありません。"}
-                    </h3>
-                    <p>
-                      {search
-                        ? "タイトル・説明・メモから検索できます。別の言葉でお試しください。"
-                        : "ほかの一覧を確認するか、新しいTODOを追加できます。"}
-                    </p>
-                    <button
-                      className="button button-secondary"
-                      onClick={() => {
-                        setSearch("");
-                        setFilter("all");
-                      }}
-                    >
-                      すべてのTODOを見る
-                      <ArrowRight size={16} />
-                    </button>
-                  </>
+                  <button
+                    className="button button-secondary"
+                    onClick={() => {
+                      setSearch("");
+                      setFilter("all");
+                    }}
+                  >
+                    すべてのTODOを見る
+                  </button>
                 )}
               </div>
             )}
           </section>
-          <footer className="main-footer">
-            <span>
-              <ShieldCheck size={14} />
-              このブラウザに保存されます
-            </span>
-            <span>
-              やることも、その続きも。
-              <span className="footer-brand">ひとつずつ。</span>
-            </span>
-          </footer>
         </main>
       </div>
       {view?.type === "create" && (
-        <Modal
-          title="新しいTODO"
-          subtitle="ひとつの「やること」から、始めよう。"
-          onClose={closeView}
-          notice={toast?.message}
-        >
+        <Modal title="新しいTODO" onClose={closeView} notice={toast?.message}>
           {store.error && (
             <p className="modal-error" role="alert">
               {store.error}
@@ -596,12 +422,7 @@ export default function App() {
         </Modal>
       )}
       {view?.type === "edit" && selected && (
-        <Modal
-          title="TODOを編集"
-          subtitle="内容はいつでも見直せます。"
-          onClose={closeView}
-          notice={toast?.message}
-        >
+        <Modal title="TODOを編集" onClose={closeView} notice={toast?.message}>
           {store.error && (
             <p className="modal-error" role="alert">
               {store.error}
@@ -610,6 +431,7 @@ export default function App() {
           <TodoForm
             key={selected.id}
             todo={selected}
+            setDeadline={view.setDeadline}
             onSave={saveDraft}
             onCancel={async () => {
               if (await allowDiscard("破棄して詳細に戻る")) {
@@ -640,11 +462,10 @@ export default function App() {
             now={now}
             onUpdate={update}
             onDirty={setDirty}
-            ask={ask}
-            onEdit={async () => {
+            onEdit={async (setDeadline = false) => {
               if (await allowDiscard("破棄して編集する")) {
                 setDirty(false);
-                setView({ type: "edit", id: selected.id });
+                setView({ type: "edit", id: selected.id, setDeadline });
               }
             }}
             onDelete={() => deleteTodo(selected)}
@@ -654,7 +475,6 @@ export default function App() {
       {view?.type === "data" && (
         <Modal
           title="データの保存・復元"
-          subtitle="大切なTODOとメモを、手元にも。"
           onClose={closeView}
           notice={toast?.message}
         >
@@ -667,9 +487,9 @@ export default function App() {
             <div className="data-notice">
               <LockKeyhole size={21} />
               <div>
-                <h3>保存先は、このブラウザです。</h3>
+                <h3>保存先：このブラウザ</h3>
                 <p>
-                  アカウント登録は不要です。ほかの利用者とTODOは共有されません。別の端末・ブラウザへの自動同期はありません。ブラウザのデータを削除するとTODOも消えるため、ときどきバックアップを残しましょう。
+                  ブラウザのサイトデータを削除すると、TODOとメモも消去されます。
                 </p>
               </div>
             </div>
@@ -683,9 +503,7 @@ export default function App() {
                 onClick={() => {
                   download(
                     store.recovery ?? serializeTodos(todos),
-                    "hitotsuzutsu-" +
-                      new Date().toISOString().slice(0, 10) +
-                      ".json",
+                    "todo-" + new Date().toISOString().slice(0, 10) + ".json",
                   );
                   setToast({ message: "バックアップの書き出しを開始しました" });
                 }}
