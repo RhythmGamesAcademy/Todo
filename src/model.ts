@@ -214,3 +214,64 @@ export function parseTodos(raw: string): Todo[] {
   }
   return data.todos as Todo[];
 }
+
+export type RestoreMode = "replace" | "merge" | "add";
+export interface RestorePlan {
+  todos: Todo[];
+  added: number;
+  updated: number;
+  removed: number;
+  unchanged: number;
+}
+export function mergeNotes(existing: Note[], incoming: Note[]): Note[] {
+  const notes = new Map(existing.map((note) => [note.id, note]));
+  for (const note of incoming) notes.set(note.id, note);
+  return [...notes.values()].sort(
+    (a, b) =>
+      Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
+      a.id.localeCompare(b.id),
+  );
+}
+export function planRestore(
+  existing: Todo[],
+  incoming: Todo[],
+  mode: RestoreMode,
+): RestorePlan {
+  const oldById = new Map(existing.map((todo) => [todo.id, todo]));
+  const newById = new Map(incoming.map((todo) => [todo.id, todo]));
+  let todos: Todo[];
+  if (mode === "replace") todos = [...incoming];
+  else {
+    todos = existing.map((todo) => {
+      const imported = newById.get(todo.id);
+      if (!imported || mode === "add") return todo;
+      return {
+        ...todo,
+        title: imported.title,
+        description: imported.description,
+        deadline: imported.deadline,
+        priority: imported.priority,
+        status: imported.status,
+        updatedAt: imported.updatedAt,
+        notes: mergeNotes(todo.notes, imported.notes),
+      };
+    });
+    todos.push(...incoming.filter((todo) => !oldById.has(todo.id)));
+  }
+  if (todos.length > 10000)
+    throw new Error("復元後のTODOは10,000件以内にしてください。");
+  const finalIds = new Set(todos.map((todo) => todo.id));
+  const added = todos.filter((todo) => !oldById.has(todo.id)).length;
+  const updated = todos.filter((todo) => {
+    const old = oldById.get(todo.id);
+    return old && JSON.stringify(old) !== JSON.stringify(todo);
+  }).length;
+  const removed = existing.filter((todo) => !finalIds.has(todo.id)).length;
+  return {
+    todos,
+    added,
+    updated,
+    removed,
+    unchanged: todos.length - added - updated,
+  };
+}

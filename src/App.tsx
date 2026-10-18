@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowDownUp,
@@ -9,26 +9,18 @@ import {
   Circle,
   CircleCheck,
   Clock3,
-  Download,
   HardDrive,
   LayoutGrid,
   LoaderCircle,
   LockKeyhole,
   Plus,
   Search,
-  Upload,
   X,
 } from "lucide-react";
-import {
-  clockText,
-  FILTER_LABEL,
-  isToday,
-  parseTodos,
-  selectTodos,
-  serializeTodos,
-} from "./model";
+import { clockText, FILTER_LABEL, isToday, selectTodos } from "./model";
 import type { Filter, Sort, Todo, TodoDraft } from "./model";
 import { useTodoStore } from "./storage";
+import { DataPanel } from "./DataPanel";
 import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
 type View =
@@ -37,16 +29,6 @@ type View =
   | { type: "data" }
   | null;
 type Confirm = AskOptions & { resolve: (answer: boolean) => void };
-function download(raw: string, name: string) {
-  const url = URL.createObjectURL(
-    new Blob([raw], { type: "application/json;charset=utf-8" }),
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 export default function App() {
   const store = useTodoStore();
   const { todos } = store;
@@ -60,9 +42,6 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; undo?: Todo } | null>(
     null,
   );
-  const [importError, setImportError] = useState("");
-  const [importing, setImporting] = useState(false);
-  const importRef = useRef<HTMLInputElement>(null);
   const ask = useCallback(
     (options: AskOptions) =>
       new Promise<boolean>((resolve) =>
@@ -189,42 +168,6 @@ export default function App() {
       }
     }
   }
-  async function importData(file?: File) {
-    if (!file) return;
-    setImportError("");
-    setImporting(true);
-    try {
-      if (file.size > 5 * 1024 * 1024)
-        throw new Error("5MB以下のJSONファイルを選択してください。");
-      const restored = parseTodos(await file.text());
-      if (
-        await ask({
-          title: "バックアップから復元しますか？",
-          description:
-            "現在のTODOとメモを、バックアップ内の" +
-            restored.length +
-            "件のTODOに置き換えます。必要なデータは先に書き出してください。",
-          confirm: "置き換えて復元",
-          cancel: "キャンセル",
-          danger: true,
-        })
-      ) {
-        if (store.save(restored, true)) {
-          setView(null);
-          setSearch("");
-          setFilter("all");
-          setToast({ message: restored.length + "件のTODOを復元しました" });
-        }
-      }
-    } catch (e) {
-      setImportError(
-        e instanceof Error ? e.message : "ファイルを読み込めませんでした。",
-      );
-    } finally {
-      setImporting(false);
-      if (importRef.current) importRef.current.value = "";
-    }
-  }
   const filters: { key: Filter; label: string; icon: typeof LayoutGrid }[] = [
     { key: "all", label: "すべてのTODO", icon: LayoutGrid },
     { key: "active", label: "未完了", icon: Circle },
@@ -246,7 +189,6 @@ export default function App() {
           <button
             className="mobile-data icon-button"
             onClick={() => {
-              setImportError("");
               setView({ type: "data" });
             }}
             aria-label="データの保存・復元"
@@ -277,7 +219,6 @@ export default function App() {
           <button
             className="storage-nav"
             onClick={() => {
-              setImportError("");
               setView({ type: "data" });
             }}
           >
@@ -289,6 +230,25 @@ export default function App() {
       </aside>
       <div className="workspace">
         <header className="topbar">
+          <svg
+            className="header-waves"
+            viewBox="0 0 1440 140"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M0 72C220 138 400 5 670 69S1110 128 1440 66V140H0Z"
+              fill="#e2f0ff"
+            />
+            <path
+              d="M0 106C300 30 470 139 780 100S1170 30 1440 103V140H0Z"
+              fill="#cfe6ff"
+            />
+            <path
+              d="M0 125C260 81 480 153 790 120S1170 84 1440 119V140H0Z"
+              fill="#b8d9fa"
+            />
+          </svg>
           <div className="clock" aria-label="現在の日時">
             <Clock3 size={23} />
             <time dateTime={now.toISOString()}>{clockText(now)}</time>
@@ -493,53 +453,17 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <div className="data-action">
-              <div>
-                <h3>バックアップを書き出す</h3>
-                <p>TODOとメモをJSONファイルに保存します。</p>
-              </div>
-              <button
-                className="button button-secondary"
-                onClick={() => {
-                  download(
-                    store.recovery ?? serializeTodos(todos),
-                    "todo-" + new Date().toISOString().slice(0, 10) + ".json",
-                  );
-                  setToast({ message: "バックアップの書き出しを開始しました" });
-                }}
-              >
-                <Download size={17} />
-                書き出す
-              </button>
-            </div>
-            <div className="data-action">
-              <div>
-                <h3>バックアップから復元する</h3>
-                <p>現在のデータを、選んだファイルの内容に置き換えます。</p>
-              </div>
-              <input
-                ref={importRef}
-                type="file"
-                accept=".json,application/json"
-                hidden
-                aria-label="復元するJSONファイル"
-                onChange={(e) => importData(e.target.files?.[0])}
-              />
-              <button
-                className="button button-secondary"
-                disabled={importing}
-                onClick={() => importRef.current?.click()}
-              >
-                <Upload size={17} />
-                {importing ? "読み込み中…" : "ファイルを選ぶ"}
-              </button>
-            </div>
-            {importError && (
-              <p className="form-error" role="alert">
-                <AlertCircle size={17} />
-                {importError}
-              </p>
-            )}
+            <DataPanel
+              todos={todos}
+              recovery={store.recovery}
+              save={store.save}
+              ask={ask}
+              notify={(message) => setToast({ message })}
+              onRestored={() => {
+                setSearch("");
+                setFilter("all");
+              }}
+            />
             {store.recovery && (
               <div className="recovery-section">
                 <h3>読み込めないデータを初期化</h3>
