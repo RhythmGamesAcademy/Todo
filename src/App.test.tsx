@@ -526,7 +526,7 @@ describe("期限超過メニュー", () => {
     const nav = within(screen.getByRole("navigation", { name: "TODOの表示" }));
     const buttons = nav.getAllByRole("button");
     expect(buttons.slice(0, 3).map((b) => b.textContent)).toEqual([
-      "すべてのTODO4",
+      "すべてのTODO3",
       "期限超過1",
       "未完了3",
     ]);
@@ -575,7 +575,11 @@ describe("直近の期限の表示", () => {
     await user.click(soonButton());
     await user.selectOptions(screen.getByLabelText("状態"), "done");
     await user.click(screen.getByRole("button", { name: "閉じる" }));
-    expect(soonButton().getAttribute("aria-description")).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: messages.todo.openLabel(soon.title),
+      }),
+    ).toBeNull();
     expect(laterButton().getAttribute("aria-description")).toBe("直近の期限");
   });
 });

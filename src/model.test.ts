@@ -26,6 +26,16 @@ const make = (
   updatedAt: now.toISOString(),
 });
 describe("TODOの表示と保存", () => {
+  it("ホームから完了済みを外し、完了の一覧で見つけられる", () => {
+    const active = make("active", null);
+    const done = { ...make("done", null), status: "done" as const };
+    expect(selectTodos([active, done], "all", "", "deadline", now)).toEqual([
+      active,
+    ]);
+    expect(selectTodos([active, done], "done", "", "deadline", now)).toEqual([
+      done,
+    ]);
+  });
   it("期限なしを最後に置き、同じ期限なら優先度で並ぶ。元データは変更しない", () => {
     const list = [
       make("none", null),

@@ -54,6 +54,10 @@ export const messages = {
     cards: "カード",
     compact: "簡潔",
   },
+  completion: {
+    announced: (title: string) => "「" + title + "」を完了に移動しました",
+    skip: "演出をスキップ",
+  },
   todo: {
     create: "新しいTODO",
     createAction: "TODOを作成",

@@ -4,16 +4,11 @@ import {
   AlertCircle,
   ArrowDownUp,
   ArrowRight,
-  CalendarDays,
   Check,
   ChevronRight,
-  Circle,
-  CircleCheck,
-  CalendarClock,
   HardDrive,
   LayoutGrid,
   List,
-  LoaderCircle,
   LockKeyhole,
   Plus,
   Search,
@@ -31,6 +26,9 @@ import { useTodoLayout, useTodoStore } from "./storage";
 import { DataPanel } from "./DataPanel";
 import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
+import { TodoNavigation } from "./components/TodoNavigation";
+import { CompletionCelebration } from "./completion/CompletionCelebration";
+import { useCompletionQueue } from "./completion/useCompletionQueue";
 type View =
   | { type: "create" }
   | { type: "detail" | "edit"; id: string; setDeadline?: boolean }
@@ -48,6 +46,7 @@ export default function App() {
   const [view, setView] = useState<View>(null);
   const [dirty, setDirty] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirm | null>(null);
+  const completion = useCompletionQueue(todos, !!view || !!confirmation);
   const [toast, setToast] = useState<{ message: string; undo?: Todo } | null>(
     null,
   );
@@ -77,7 +76,7 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   const counts: Record<Filter, number> = {
-    all: todos.length,
+    all: todos.filter((t) => t.status !== "done").length,
     overdue: todos.filter((todo) => isOverdue(todo, now)).length,
     active: todos.filter((t) => t.status !== "done").length,
     today: todos.filter((t) => t.status !== "done" && isToday(t.deadline, now))
@@ -124,6 +123,9 @@ export default function App() {
   function update(todo: Todo, message: string) {
     if (!store.save(todos.map((t) => (t.id === todo.id ? todo : t))))
       return false;
+    const previous = todos.find((t) => t.id === todo.id);
+    if (previous && previous.status !== "done" && todo.status === "done")
+      completion.enqueue(todo);
     setToast({ message });
     return true;
   }
@@ -177,14 +179,6 @@ export default function App() {
       }
     }
   }
-  const filters: { key: Filter; icon: typeof LayoutGrid }[] = [
-    { key: "all", icon: LayoutGrid },
-    { key: "overdue", icon: CalendarClock },
-    { key: "active", icon: Circle },
-    { key: "today", icon: CalendarDays },
-    { key: "doing", icon: LoaderCircle },
-    { key: "done", icon: CircleCheck },
-  ];
   return (
     <div className="app-shell">
       <a href="#main" className="skip-link">
@@ -229,25 +223,17 @@ export default function App() {
         </div>
       </header>
       <aside className="sidebar">
-        <nav aria-label={messages.app.navigation}>
-          <div className="nav-items">
-            {filters.map(({ key, icon: Icon }) => (
-              <button
-                key={key}
-                className={"nav-item " + (filter === key ? "active" : "")}
-                aria-current={filter === key ? "page" : undefined}
-                onClick={() => {
-                  setFilter(key);
-                  setSearch("");
-                }}
-              >
-                <Icon size={19} />
-                <span>{messages.filters.navigation[key]}</span>
-                <span className="nav-count">{counts[key]}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
+        <TodoNavigation
+          filter={filter}
+          counts={{ ...counts, done: completion.displayedCount }}
+          onSelect={(key) => {
+            setFilter(key);
+            setSearch("");
+          }}
+          doneTarget={completion.target}
+          doneCounter={completion.counter}
+          arrival={completion.arrival}
+        />
         <div className="sidebar-bottom">
           <button
             className="storage-nav"
@@ -381,7 +367,7 @@ export default function App() {
                 <p>
                   {search ? messages.filters.noResults : messages.filters.empty}
                 </p>
-                {!todos.length ? (
+                {!todos.length || (!search && counts.all === 0) ? (
                   <button
                     className="button button-primary"
                     onClick={openCreate}
@@ -577,13 +563,22 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {completion.current && (
+        <CompletionCelebration
+          key={completion.current.id}
+          todo={completion.current}
+          target={completion.target}
+          counter={completion.counter}
+          onArrive={completion.arrive}
+        />
+      )}
       <div
         className="toast-region"
         role="status"
         aria-live="polite"
         aria-atomic="true"
       >
-        {toast && !view && (
+        {toast && !view && !completion.current && (
           <div className="toast">
             <span className="toast-icon">
               <Check size={17} />

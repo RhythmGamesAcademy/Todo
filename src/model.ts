@@ -93,7 +93,7 @@ export function selectTodos(
   return todos
     .filter((t) => {
       const matches =
-        filter === "all" ||
+        (filter === "all" && t.status !== "done") ||
         (filter === "overdue" && isOverdue(t, now)) ||
         (filter === "active" && t.status !== "done") ||
         (filter === "today" &&
