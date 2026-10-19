@@ -164,6 +164,17 @@ describe("TODOの表示と保存", () => {
       new Date(task.deadline!).getTime(),
     );
   });
+  it("担当者導入前のバックアップは担当者なしとして復元する", () => {
+    const legacy: Record<string, unknown> = { ...make("legacy", null) };
+    delete legacy.assigneeId;
+    const [task] = parseTodos(JSON.stringify({ version: 1, todos: [legacy] }));
+    expect(task.assigneeId).toBeNull();
+    expect(task).toEqual({ ...legacy, assigneeId: null });
+    const [assigned] = parseTodos(
+      serializeTodos([{ ...make("assigned", null), assigneeId: "u1" }]),
+    );
+    expect(assigned.assigneeId).toBe("u1");
+  });
   it("壊れた形式、重複ID、不正な日時・メモは復元しない", () => {
     const task = make("task", null);
     for (const raw of [
@@ -171,6 +182,7 @@ describe("TODOの表示と保存", () => {
       JSON.stringify([]),
       serializeTodos([task, task]),
       serializeTodos([{ ...task, deadline: "invalid" }]),
+      serializeTodos([{ ...task, assigneeId: 1 } as unknown as Todo]),
       serializeTodos([
         {
           ...task,

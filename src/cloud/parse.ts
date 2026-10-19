@@ -20,11 +20,39 @@ const fail = (): never => {
   throw new Error(messages.errors.invalidState);
 };
 
-const validId = (x: unknown): x is string => typeof x === "string" && !!x;
+const validId = (x: unknown): x is string =>
+  typeof x === "string" && !!x.trim();
 const validText = (x: unknown, max: number): x is string =>
   typeof x === "string" && !!x.trim() && x.length <= max;
 const nullableString = (x: unknown): x is string | null =>
   x === null || typeof x === "string";
+const ISO_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+const daysInMonth = (year: number, month: number) =>
+  month === 2
+    ? year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+      ? 29
+      : 28
+    : [4, 6, 9, 11].includes(month)
+      ? 30
+      : 31;
+const isIsoTimestamp = (x: unknown): x is string => {
+  if (typeof x !== "string") return false;
+  const match = ISO_TIMESTAMP.exec(x);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    Number(match[3]) >= 1 &&
+    Number(match[3]) <= daysInMonth(year, month) &&
+    Number(match[4]) <= 23 &&
+    Number(match[5]) <= 59 &&
+    (match[6] === undefined || Number(match[6]) <= 59) &&
+    validDate(x)
+  );
+};
 const oneOf = <T extends string>(values: readonly T[], x: unknown): x is T =>
   typeof x === "string" && (values as readonly string[]).includes(x);
 
@@ -46,7 +74,7 @@ function validateUser(value: unknown, ids: Set<string>): void {
     !validId(value.id) ||
     ids.has(value.id) ||
     !validText(value.name, 120) ||
-    !validDate(value.createdAt)
+    !isIsoTimestamp(value.createdAt)
   )
     return fail();
   ids.add(value.id);
@@ -58,8 +86,8 @@ function validateNote(value: unknown, ids: Set<string>): void {
     !validId(value.id) ||
     ids.has(value.id) ||
     !validText(value.text, 2000) ||
-    !validDate(value.createdAt) ||
-    !(value.editedAt === undefined || validDate(value.editedAt))
+    !isIsoTimestamp(value.createdAt) ||
+    !(value.editedAt === undefined || isIsoTimestamp(value.editedAt))
   )
     return fail();
   ids.add(value.id);
@@ -73,12 +101,12 @@ function validateTodo(value: unknown, ids: Set<string>): void {
     !validText(value.title, 120) ||
     typeof value.description !== "string" ||
     value.description.length > 2000 ||
-    !(value.deadline === null || validDate(value.deadline)) ||
+    !(value.deadline === null || isIsoTimestamp(value.deadline)) ||
     !oneOf(PRIORITIES, value.priority) ||
     !oneOf(STATUSES, value.status) ||
     !(value.assigneeId === null || validId(value.assigneeId)) ||
-    !validDate(value.createdAt) ||
-    !validDate(value.updatedAt) ||
+    !isIsoTimestamp(value.createdAt) ||
+    !isIsoTimestamp(value.updatedAt) ||
     !Array.isArray(value.notes)
   )
     return fail();
@@ -98,7 +126,7 @@ function validateActivity(value: unknown, ids: Set<string>): void {
     !nullableString(value.field) ||
     !nullableString(value.before) ||
     !nullableString(value.after) ||
-    !validDate(value.createdAt)
+    !isIsoTimestamp(value.createdAt)
   )
     return fail();
   ids.add(value.id);

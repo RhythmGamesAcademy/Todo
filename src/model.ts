@@ -189,12 +189,19 @@ export function parseTodos(raw: string): Todo[] {
       !(t.deadline === null || validDate(t.deadline)) ||
       !["high", "medium", "low"].includes(String(t.priority)) ||
       !["todo", "doing", "done"].includes(String(t.status)) ||
+      !(
+        t.assigneeId === undefined ||
+        t.assigneeId === null ||
+        typeof t.assigneeId === "string"
+      ) ||
       !validDate(t.createdAt) ||
       !validDate(t.updatedAt) ||
       !Array.isArray(t.notes)
     )
       throw new Error(messages.errors.invalidTodo);
     ids.add(t.id);
+    // 担当者導入前のバックアップは担当者なしとして扱う
+    if (t.assigneeId === undefined) t.assigneeId = null;
     const noteIds = new Set<string>();
     for (const n of t.notes) {
       if (

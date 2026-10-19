@@ -104,6 +104,12 @@ describe("parseCloudState", () => {
     reject(broken((s) => (s.users = null)));
   });
 
+  it("todos・activities・list の型を検証する", () => {
+    reject(broken((s) => (s.todos = {})));
+    reject(broken((s) => (s.activities = {})));
+    reject(broken((s) => (s.list = [])));
+  });
+
   it("TODO に assigneeId がなければ拒否する", () => {
     reject(broken((s) => delete s.todos[0].assigneeId));
     reject(broken((s) => (s.todos[0].assigneeId = 1)));
@@ -129,13 +135,35 @@ describe("parseCloudState", () => {
     reject(broken((s) => delete s.todos[0].deadline));
   });
 
-  it("日時は ISO として解釈できる文字列でなければ拒否する", () => {
+  it("日時は完全な ISO 8601 文字列でなければ拒否する", () => {
     reject(broken((s) => (s.users[0].createdAt = 0)));
     reject(broken((s) => (s.todos[0].createdAt = "yesterday")));
     reject(broken((s) => (s.todos[0].updatedAt = null)));
     reject(broken((s) => (s.todos[0].notes[0].createdAt = {})));
     reject(broken((s) => (s.todos[0].notes[1].editedAt = false)));
     reject(broken((s) => (s.activities[0].createdAt = undefined)));
+    reject(broken((s) => (s.users[0].createdAt = "2026/10/19")));
+    reject(broken((s) => (s.users[0].createdAt = "Oct 19 2026")));
+    reject(broken((s) => (s.todos[0].createdAt = "2026-10-19")));
+    reject(broken((s) => (s.todos[0].deadline = "2026-10-20")));
+    reject(broken((s) => (s.todos[0].updatedAt = "2026-10-19T09:00:00")));
+    reject(broken((s) => (s.todos[0].createdAt = "2026-02-30T00:00:00Z")));
+    reject(broken((s) => (s.todos[0].createdAt = "2026-02-29T00:00:00Z")));
+    reject(broken((s) => (s.todos[0].createdAt = "2026-13-01T00:00:00Z")));
+    reject(broken((s) => (s.todos[0].createdAt = "2026-10-19T24:00:00Z")));
+    reject(broken((s) => (s.todos[0].createdAt = "2026-10-19T09:60:00Z")));
+  });
+
+  it("ISO 8601 のタイムゾーン・秒・小数秒の表記を受け付ける", () => {
+    const accept = (change: (state: any) => void) =>
+      expect(() => parseCloudState(broken(change))).not.toThrow();
+    accept((s) => (s.todos[0].deadline = "2026-10-20T18:00:00+0900"));
+    accept((s) => (s.todos[0].createdAt = "2026-10-19T09:00Z"));
+    accept((s) => (s.todos[0].updatedAt = "2026-10-19T09:00:00.123456Z"));
+    accept((s) => (s.todos[0].notes[0].createdAt = "2026-10-19T09:00:00.1Z"));
+    accept((s) => (s.todos[0].notes[1].editedAt = "2026-10-19T09:00:00-05:00"));
+    accept((s) => (s.users[0].createdAt = "2028-02-29T00:00:00Z"));
+    accept((s) => (s.activities[0].createdAt = "2026-10-19T09:00:00+09:00"));
   });
 
   it("TODO の必須項目と長さを検証する", () => {
@@ -174,6 +202,14 @@ describe("parseCloudState", () => {
     reject(broken((s) => (s.todos[1].id = s.todos[0].id)));
     reject(broken((s) => (s.todos[0].notes[1].id = s.todos[0].notes[0].id)));
     reject(broken((s) => (s.activities[1].id = s.activities[0].id)));
+  });
+
+  it("空白だけの ID を拒否する", () => {
+    reject(broken((s) => (s.list.id = " ")));
+    reject(broken((s) => (s.users[0].id = " ")));
+    reject(broken((s) => (s.todos[0].id = "   ")));
+    reject(broken((s) => (s.todos[0].notes[0].id = "\t")));
+    reject(broken((s) => (s.activities[0].id = " ")));
   });
 
   it("不正な要素が1つでもあれば全体を拒否する", () => {
