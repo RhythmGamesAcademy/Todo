@@ -77,6 +77,15 @@ describe("TODOの表示と保存", () => {
     const task = make("レポート提出", "2026-10-18T14:55:00+09:00");
     task.description = "説明 & 確認\n改行";
     const url = new URL(calendarUrl(task)!);
+    expect(url.origin + url.pathname).toBe(
+      "https://calendar.google.com/calendar/render",
+    );
+    expect(url.searchParams.get("action")).toBe("TEMPLATE");
+    const browserUrl = new URL(calendarUrl(task, true)!);
+    expect(browserUrl.origin + browserUrl.pathname).toBe(
+      "https://www.google.com/calendar/render",
+    );
+    expect(browserUrl.search).toBe(url.search);
     expect(url.searchParams.get("dates")).toBe(
       "20261018T055500Z/20261018T061000Z",
     );

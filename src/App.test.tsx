@@ -116,9 +116,16 @@ describe("メモの表示演出", () => {
     ).toHaveLength(2);
     const thread = () =>
       within(screen.getByRole("list", { name: "メモの履歴" }));
-    expect(thread().queryByText("最初のメモ")).toBeNull();
+    const firstBody = thread()
+      .getByText("最初のメモ")
+      .closest(".message-reveal");
+    expect(firstBody?.getAttribute("aria-hidden")).toBe("true");
     act(() => vi.advanceTimersByTime(220));
     expect(thread().getByText("最初のメモ")).toBeTruthy();
+    expect(thread().getByText("最初のメモ").closest(".message-reveal")).toBe(
+      firstBody,
+    );
+    expect(firstBody?.getAttribute("aria-hidden")).toBeNull();
     expect(
       screen.getAllByRole("status", { name: "メモを表示中" }),
     ).toHaveLength(1);
@@ -134,17 +141,25 @@ describe("メモの表示演出", () => {
     expect(thread().getByText("演出中に閉じたメモ")).toBeTruthy();
     expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
   });
-  it("動きを減らす設定では点の待ち時間を省略し、すぐ本文を表示する", () => {
+  it("端末の動きを減らす設定より、明示的に選んだメモの演出を優先する", () => {
+    vi.useFakeTimers();
     motion(true);
     seed();
     render(<App />);
     fireEvent.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    send("すぐ表示するメモ");
+    send("演出を優先するメモ");
+    expect(screen.getByRole("status", { name: "メモを表示中" })).toBeTruthy();
+    const body = within(screen.getByRole("list", { name: "メモの履歴" }))
+      .getByText("演出を優先するメモ")
+      .closest(".message-reveal");
+    expect(body?.getAttribute("aria-hidden")).toBe("true");
+    act(() => vi.advanceTimersByTime(420));
+    expect(body?.getAttribute("aria-hidden")).toBeNull();
     expect(
       within(screen.getByRole("list", { name: "メモの履歴" })).getByText(
-        "すぐ表示するメモ",
+        "演出を優先するメモ",
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
@@ -164,6 +179,52 @@ const task = (): Todo => ({
 const seed = () => localStorage.setItem(STORAGE_KEY, serializeTodos([task()]));
 
 describe("利用者の操作", () => {
+  it("優先度は左から低・中・高の順で選べて、選んだ値で保存する", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    const radios = within(
+      screen.getByRole("group", { name: "優先度" }),
+    ).getAllByRole("radio");
+    expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+    await user.type(screen.getByLabelText(/^タイトル/), "低い優先度の課題");
+    fireEvent.change(screen.getByLabelText("期限"), {
+      target: { value: "2026-10-30T23:59" },
+    });
+    await user.click(radios[0]);
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "TODOを作成",
+      }),
+    );
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].priority).toBe(
+      "low",
+    );
+  });
+  it("送信ボタンは入力欄へフォーカスを戻さず、キーボードショートカットは入力を続けられる", async () => {
+    seed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    const input = screen.getByLabelText("メモを入力");
+    await user.type(input, "ボタンから送信");
+    await user.click(screen.getByRole("button", { name: "送信" }));
+    expect(document.activeElement).not.toBe(input);
+    await user.type(input, "キーボードから送信");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(document.activeElement).toBe(input);
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes.map(
+        (n) => n.text,
+      ),
+    ).toEqual(["ボタンから送信", "キーボードから送信"]);
+  });
   it("期限なしの作成前に確認し、戻れば保存せず、承認後だけ作成する", async () => {
     const user = userEvent.setup();
     render(<App />);

@@ -357,7 +357,7 @@ export function TodoForm({
       <fieldset className="priority-field">
         <legend className="field-label">{messages.todo.priority}</legend>
         <div className="priority-options">
-          {(["high", "medium", "low"] as Priority[]).map((p) => (
+          {(["low", "medium", "high"] as Priority[]).map((p) => (
             <label
               key={p}
               className={
@@ -429,22 +429,45 @@ export interface AskOptions {
   danger?: boolean;
 }
 function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
-  const [pending, setPending] = useState(
-    () =>
-      enter && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
-  );
+  const [pending, setPending] = useState(enter);
   const row = useRef<HTMLLIElement>(null);
   const followReveal = useRef(false);
   useEffect(() => {
     if (!pending) {
       if (followReveal.current) {
         const list = row.current?.closest("ol");
-        list?.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
-        followReveal.current = false;
+        if (!list || !row.current) return;
+        // Keep the unfolding text in view, but stop following if the reader scrolls.
+        const follow = () => {
+          if (followReveal.current)
+            list.scrollTo({ top: list.scrollHeight, behavior: "auto" });
+        };
+        const stop = () => {
+          followReveal.current = false;
+        };
+        const observer =
+          typeof ResizeObserver === "undefined"
+            ? null
+            : new ResizeObserver(follow);
+        observer?.observe(row.current);
+        list.addEventListener("wheel", stop, { passive: true });
+        list.addEventListener("touchstart", stop, { passive: true });
+        list.addEventListener("keydown", stop);
+        follow();
+        const timer = window.setTimeout(() => {
+          observer?.disconnect();
+          stop();
+        }, 520);
+        return () => {
+          window.clearTimeout(timer);
+          observer?.disconnect();
+          list.removeEventListener("wheel", stop);
+          list.removeEventListener("touchstart", stop);
+          list.removeEventListener("keydown", stop);
+        };
       }
       return;
     }
-    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     function reveal() {
       const list = row.current?.closest("ol");
       followReveal.current =
@@ -452,13 +475,8 @@ function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
       setPending(false);
     }
     const timer = window.setTimeout(reveal, 420);
-    const reduceMotion = () => {
-      if (motion?.matches) setPending(false);
-    };
-    motion?.addEventListener?.("change", reduceMotion);
     return () => {
       window.clearTimeout(timer);
-      motion?.removeEventListener?.("change", reduceMotion);
     };
   }, [pending]);
   return (
@@ -474,21 +492,27 @@ function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
         <time className="message-time" dateTime={note.createdAt}>
           {clockText(new Date(note.createdAt))}
         </time>
-        {pending ? (
+        <div
+          className={
+            "message-body " + (pending ? "message-pending" : "message-revealed")
+          }
+        >
           <span
             className="message-dots"
-            role="status"
-            aria-label={messages.chat.revealing}
+            role={pending ? "status" : undefined}
+            aria-label={pending ? messages.chat.revealing : undefined}
+            aria-hidden={!pending}
           >
             <span aria-hidden="true" />
             <span aria-hidden="true" />
             <span aria-hidden="true" />
           </span>
-        ) : (
-          <p className={"message-text " + (enter ? "message-text-reveal" : "")}>
-            {note.text}
-          </p>
-        )}
+          <div className="message-reveal" aria-hidden={pending || undefined}>
+            <div>
+              <p className="message-text">{note.text}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </li>
   );
@@ -546,7 +570,6 @@ export function TodoDetail({
       scrollAfterSend.current = true;
       setSentIds((ids) => new Set(ids).add(note.id));
       setText("");
-      composer.current?.focus({ preventScroll: true });
     }
   }
   return (
@@ -658,6 +681,7 @@ export function TodoDetail({
                 disabled={!text.trim()}
                 aria-label={messages.chat.send}
                 title={messages.chat.sendShortcut}
+                onClick={() => composer.current?.blur()}
               >
                 <ArrowUp size={20} />
               </button>
@@ -672,17 +696,29 @@ export function TodoDetail({
         </button>
         <div className="calendar-action">
           {url ? (
-            <a
-              className="button button-primary"
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={messages.calendar.openLabel}
-            >
-              <CalendarDays size={17} />
-              {messages.calendar.register}
-              <ArrowUpRight size={15} />
-            </a>
+            <>
+              <a
+                className="text-button calendar-web"
+                href={calendarUrl(todo, true)!}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={messages.calendar.webOpenLabel}
+              >
+                {messages.calendar.webOpen}
+                <ArrowUpRight size={13} />
+              </a>
+              <a
+                className="button button-primary"
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={messages.calendar.openLabel}
+              >
+                <CalendarDays size={17} />
+                {messages.calendar.register}
+                <ArrowUpRight size={15} />
+              </a>
+            </>
           ) : (
             <>
               <span className="calendar-reason">

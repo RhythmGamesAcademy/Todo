@@ -121,7 +121,7 @@ export function selectTodos(
       return a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
     });
 }
-export function calendarUrl(todo: Todo) {
+export function calendarUrl(todo: Todo, browser = false) {
   if (!todo.deadline) return null;
   const start = new Date(todo.deadline);
   const end = new Date(start.getTime() + 15 * 60 * 1000);
@@ -137,7 +137,9 @@ export function calendarUrl(todo: Todo) {
     details: todo.description,
   });
   return (
-    "https://calendar.google.com/calendar/r/eventedit?" + params.toString()
+    (browser
+      ? "https://www.google.com/calendar/render?"
+      : "https://calendar.google.com/calendar/render?") + params.toString()
   );
 }
 export function serializeTodos(todos: Todo[]) {

@@ -3,8 +3,8 @@ const pad = (value: number) => String(value).padStart(2, "0");
 export const messages = {
   locale: "ja",
   app: {
-    title: "TODO",
-    description: "TODOアプリ",
+    title: "トドTODO",
+    description: "トドのようにTODOを遂行できるTODOウェブアプリ",
     skipToMain: "メインコンテンツへ",
     navigation: "TODOの表示",
     currentTime: "現在の日時",
@@ -43,7 +43,7 @@ export const messages = {
     noResults: "検索結果なし",
   },
   search: {
-    label: "TODO・メモを検索",
+    label: "要素を検索",
     clear: "検索をクリア",
     sort: "並べ替え",
     deadlineOrder: "期限が近い順",
@@ -120,6 +120,8 @@ export const messages = {
   calendar: {
     register: "Googleカレンダーに登録",
     openLabel: "Googleカレンダーに登録（別タブで開く）",
+    webOpen: "ブラウザー版で開く",
+    webOpenLabel: "Googleカレンダーのブラウザー版で開く（別タブで開く）",
     deadlineMissing: "期限未設定",
     setDeadline: "期限を設定",
     eventTitle: (title: string) => "【締切】" + title,
