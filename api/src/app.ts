@@ -237,9 +237,11 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     before: string | null,
     after: string | null,
   ): SqlCall =>
+    // now() はトランザクション開始時刻で同一になるため、履歴の並び順を保つために
+    // 実行時刻の clock_timestamp() を明示する。
     sql`
-      INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after)
-      VALUES (${randomUUID()}, ${listId}, ${todoId}, ${userId}, ${kind}, ${field}, ${before}, ${after})
+      INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+      VALUES (${randomUUID()}, ${listId}, ${todoId}, ${userId}, ${kind}, ${field}, ${before}, ${after}, clock_timestamp())
     `;
 
   app.post("/api/lists", async (c) => {
@@ -254,8 +256,8 @@ export function createApp({ sql, transact }: AppDeps): Hono {
       sql`INSERT INTO lists (id, token, title) VALUES (${listId}, ${token}, ${title})`,
       sql`INSERT INTO users (id, list_id, name) VALUES (${userId}, ${listId}, ${name})`,
       sql`
-        INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after)
-        VALUES (${activityId}, ${listId}, NULL, ${userId}, 'user.joined', NULL, NULL, ${name})
+        INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+        VALUES (${activityId}, ${listId}, NULL, ${userId}, 'user.joined', NULL, NULL, ${name}, clock_timestamp())
       `,
     ]);
     return c.json({ token }, 201);
@@ -283,8 +285,8 @@ export function createApp({ sql, transact }: AppDeps): Hono {
         ON CONFLICT (list_id, name) DO NOTHING
       `,
       sql`
-        INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after)
-        SELECT ${activityId}, ${list.id}, NULL, ${userId}, 'user.joined', NULL, NULL, ${name}
+        INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+        SELECT ${activityId}, ${list.id}, NULL, ${userId}, 'user.joined', NULL, NULL, ${name}, clock_timestamp()
         WHERE EXISTS (SELECT 1 FROM users WHERE id = ${userId})
       `,
     ]);
