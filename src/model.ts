@@ -3,6 +3,7 @@ export type Status = "todo" | "doing" | "done";
 export type Priority = "high" | "medium" | "low";
 export type Filter = "all" | "overdue" | "active" | "today" | "doing" | "done";
 export type Sort = "deadline" | "priority";
+export type AssigneeFilter = "any" | "none" | string;
 export interface Note {
   id: string;
   text: string;
@@ -16,6 +17,7 @@ export interface Todo {
   deadline: string | null;
   priority: Priority;
   status: Status;
+  assigneeId: string | null;
   createdAt: string;
   updatedAt: string;
   notes: Note[];
@@ -26,6 +28,7 @@ export interface TodoDraft {
   deadline: string | null;
   priority: Priority;
   status: Status;
+  assigneeId: string | null;
 }
 export const STORAGE_KEY = "hitotsuzutsu.todos.v1";
 export const STATUS: Record<Status, string> = messages.status;
@@ -85,6 +88,7 @@ export function selectTodos(
   search: string,
   sort: Sort,
   now: Date,
+  assignee: AssigneeFilter,
 ) {
   const query = search.trim().toLocaleLowerCase();
   const ranks = { high: 0, medium: 1, low: 2 };
@@ -103,6 +107,10 @@ export function selectTodos(
         (filter === "done" && t.status === "done");
       return (
         matches &&
+        (assignee === "any" ||
+          (assignee === "none"
+            ? t.assigneeId === null
+            : t.assigneeId === assignee)) &&
         (!query ||
           [t.title, t.description, ...t.notes.map((n) => n.text)].some((s) =>
             s.toLocaleLowerCase().includes(query),

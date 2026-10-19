@@ -26,6 +26,7 @@ const task: Todo = {
   description: "提出前の確認",
   status: "doing",
   priority: "medium",
+  assigneeId: null,
   deadline: null,
   createdAt: "2026-10-19T00:00:00Z",
   updatedAt: "2026-10-19T00:00:00Z",

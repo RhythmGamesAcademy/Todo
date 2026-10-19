@@ -95,7 +95,7 @@ export default function App() {
     done: todos.filter((t) => t.status === "done").length,
   };
   const visible = useMemo(
-    () => selectTodos(todos, filter, search, sort, now),
+    () => selectTodos(todos, filter, search, sort, now, "any"),
     [todos, filter, search, sort, now],
   );
   const selected =

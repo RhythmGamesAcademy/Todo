@@ -21,6 +21,7 @@ const make = (
   deadline,
   priority,
   status: "todo",
+  assigneeId: null,
   notes: [],
   createdAt: now.toISOString(),
   updatedAt: now.toISOString(),
@@ -29,13 +30,12 @@ describe("TODOの表示と保存", () => {
   it("すべてのTODOにも完了済みを含め、完了の一覧で絞り込める", () => {
     const active = make("active", null);
     const done = { ...make("done", null), status: "done" as const };
-    expect(selectTodos([active, done], "all", "", "deadline", now)).toEqual([
-      active,
-      done,
-    ]);
-    expect(selectTodos([active, done], "done", "", "deadline", now)).toEqual([
-      done,
-    ]);
+    expect(
+      selectTodos([active, done], "all", "", "deadline", now, "any"),
+    ).toEqual([active, done]);
+    expect(
+      selectTodos([active, done], "done", "", "deadline", now, "any"),
+    ).toEqual([done]);
   });
   it.each(["deadline", "priority"] as const)(
     "完了済みを末尾に集め、両グループ内を%s順にする",
@@ -54,7 +54,7 @@ describe("TODOの表示と保存", () => {
       ];
       const original = [...list];
       expect(
-        selectTodos(list, "all", "", sort, now).map((todo) => todo.id),
+        selectTodos(list, "all", "", sort, now, "any").map((todo) => todo.id),
       ).toEqual(
         sort === "deadline"
           ? ["active-soon", "active-later", "done-soon", "done-later"]
@@ -72,7 +72,7 @@ describe("TODOの表示と保存", () => {
       make("none-high", null, "high"),
     ];
     expect(
-      selectTodos(list, "all", "", "deadline", now).map((t) => t.id),
+      selectTodos(list, "all", "", "deadline", now, "any").map((t) => t.id),
     ).toEqual(["high", "low", "later", "none-high", "none"]);
     expect(list[0].id).toBe("none");
   });
@@ -83,7 +83,7 @@ describe("TODOの表示と保存", () => {
       make("high-due", "2026-10-20T00:00:00Z", "high"),
     ];
     expect(
-      selectTodos(list, "all", "", "priority", now).map((t) => t.id),
+      selectTodos(list, "all", "", "priority", now, "any").map((t) => t.id),
     ).toEqual(["high-due", "high-none", "low"]);
   });
   it("メモも検索し、完了状態で絞り込める", () => {
@@ -92,16 +92,35 @@ describe("TODOの表示と保存", () => {
     task.notes = [
       { id: "note", text: "資料を調査した", createdAt: now.toISOString() },
     ];
-    expect(selectTodos([task], "done", "調査", "deadline", now)).toEqual([
-      task,
-    ]);
-    expect(selectTodos([task], "active", "調査", "deadline", now)).toEqual([]);
+    expect(selectTodos([task], "done", "調査", "deadline", now, "any")).toEqual(
+      [task],
+    );
+    expect(
+      selectTodos([task], "active", "調査", "deadline", now, "any"),
+    ).toEqual([]);
+  });
+  it("selectTodos filters by assignee", () => {
+    const todos = [
+      make("unassigned", null),
+      { ...make("assigned", null), assigneeId: "u1" },
+    ];
+    expect(
+      selectTodos(todos, "all", "", "deadline", now, "none").map(
+        (t) => t.assigneeId,
+      ),
+    ).toEqual([null]);
+    expect(selectTodos(todos, "all", "", "deadline", now, "u1").length).toBe(1);
+    expect(selectTodos(todos, "all", "", "deadline", now, "any").length).toBe(
+      2,
+    );
   });
   it("今日が期限の一覧には完了済みを含めない", () => {
     const task = make("today", now.toISOString());
     const done = { ...task, id: "done", status: "done" as const };
     expect(
-      selectTodos([task, done], "today", "", "deadline", now).map((t) => t.id),
+      selectTodos([task, done], "today", "", "deadline", now, "any").map(
+        (t) => t.id,
+      ),
     ).toEqual(["today"]);
   });
   it("完了済みと期限なしのTODOは期限超過にならない", () => {
@@ -176,12 +195,14 @@ describe("期限超過の一覧", () => {
       make("future", future),
     ];
     expect(
-      selectTodos(list, "overdue", "", "deadline", now)
+      selectTodos(list, "overdue", "", "deadline", now, "any")
         .map((t) => t.id)
         .sort(),
     ).toEqual(["doing", "past"]);
     expect(
-      selectTodos(list, "overdue", "doing", "deadline", now).map((t) => t.id),
+      selectTodos(list, "overdue", "doing", "deadline", now, "any").map(
+        (t) => t.id,
+      ),
     ).toEqual(["doing"]);
   });
 });

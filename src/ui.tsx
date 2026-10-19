@@ -281,6 +281,7 @@ export function TodoForm({
       deadline: deadlineIso,
       priority,
       status,
+      assigneeId: todo?.assigneeId ?? null,
     });
   }
   return (

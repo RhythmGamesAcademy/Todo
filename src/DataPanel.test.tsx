@@ -18,6 +18,7 @@ const task = (id: string, extra: Partial<Todo> = {}): Todo => ({
   deadline: null,
   priority: "medium",
   status: "todo",
+  assigneeId: null,
   notes: [],
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-02T00:00:00Z",

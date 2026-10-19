@@ -187,6 +187,7 @@ const task = (): Todo => ({
   deadline: "2026-10-30T10:00:00.000Z",
   priority: "high",
   status: "doing",
+  assigneeId: null,
   createdAt: "2026-10-18T00:00:00.000Z",
   updatedAt: "2026-10-18T00:00:00.000Z",
   notes: [],
