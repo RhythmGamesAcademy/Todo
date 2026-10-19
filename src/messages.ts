@@ -57,6 +57,10 @@ export const messages = {
   completion: {
     announced: (title: string) => "「" + title + "」を完了に移動しました",
     skip: "演出をスキップ",
+    title: "タスクが完了しました",
+    allDone: "🎉 素晴らしい！すべて消化できました",
+    oneLeft: "🔥 残るは1個です！",
+    keepGoing: "🌊 この調子で頑張りましょう",
   },
   todo: {
     create: "新しいTODO",

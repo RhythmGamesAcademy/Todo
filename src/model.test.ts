@@ -26,16 +26,43 @@ const make = (
   updatedAt: now.toISOString(),
 });
 describe("TODOの表示と保存", () => {
-  it("ホームから完了済みを外し、完了の一覧で見つけられる", () => {
+  it("すべてのTODOにも完了済みを含め、完了の一覧で絞り込める", () => {
     const active = make("active", null);
     const done = { ...make("done", null), status: "done" as const };
     expect(selectTodos([active, done], "all", "", "deadline", now)).toEqual([
       active,
+      done,
     ]);
     expect(selectTodos([active, done], "done", "", "deadline", now)).toEqual([
       done,
     ]);
   });
+  it.each(["deadline", "priority"] as const)(
+    "完了済みを末尾に集め、両グループ内を%s順にする",
+    (sort) => {
+      const list = [
+        {
+          ...make("done-soon", "2026-10-19T00:00:00Z", "low"),
+          status: "done" as const,
+        },
+        make("active-later", "2026-10-23T00:00:00Z", "high"),
+        {
+          ...make("done-later", "2026-10-20T00:00:00Z", "high"),
+          status: "done" as const,
+        },
+        make("active-soon", "2026-10-22T00:00:00Z", "low"),
+      ];
+      const original = [...list];
+      expect(
+        selectTodos(list, "all", "", sort, now).map((todo) => todo.id),
+      ).toEqual(
+        sort === "deadline"
+          ? ["active-soon", "active-later", "done-soon", "done-later"]
+          : ["active-later", "active-soon", "done-later", "done-soon"],
+      );
+      expect(list).toEqual(original);
+    },
+  );
   it("期限なしを最後に置き、同じ期限なら優先度で並ぶ。元データは変更しない", () => {
     const list = [
       make("none", null),

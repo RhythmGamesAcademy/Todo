@@ -93,7 +93,7 @@ export function selectTodos(
   return todos
     .filter((t) => {
       const matches =
-        (filter === "all" && t.status !== "done") ||
+        filter === "all" ||
         (filter === "overdue" && isOverdue(t, now)) ||
         (filter === "active" && t.status !== "done") ||
         (filter === "today" &&
@@ -110,6 +110,9 @@ export function selectTodos(
       );
     })
     .sort((a, b) => {
+      const completionOrder =
+        Number(a.status === "done") - Number(b.status === "done");
+      if (filter === "all" && completionOrder) return completionOrder;
       const priorityOrder =
         sort === "priority" ? ranks[a.priority] - ranks[b.priority] : 0;
       if (priorityOrder) return priorityOrder;

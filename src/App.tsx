@@ -29,6 +29,7 @@ import type { AskOptions } from "./ui";
 import { TodoNavigation } from "./components/TodoNavigation";
 import { CompletionCelebration } from "./completion/CompletionCelebration";
 import { useCompletionQueue } from "./completion/useCompletionQueue";
+import { CompletionNotice } from "./completion/CompletionNotice";
 type View =
   | { type: "create" }
   | { type: "detail" | "edit"; id: string; setDeadline?: boolean }
@@ -46,9 +47,18 @@ export default function App() {
   const [view, setView] = useState<View>(null);
   const [dirty, setDirty] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirm | null>(null);
-  const completion = useCompletionQueue(todos, !!view || !!confirmation);
   const [toast, setToast] = useState<{ message: string; undo?: Todo } | null>(
     null,
+  );
+  const prepareCompletion = useCallback(() => {
+    setFilter("active");
+    setSearch("");
+    setToast(null);
+  }, []);
+  const completion = useCompletionQueue(
+    todos,
+    !!view || !!confirmation,
+    prepareCompletion,
   );
   const ask = useCallback(
     (options: AskOptions) =>
@@ -76,7 +86,7 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   const counts: Record<Filter, number> = {
-    all: todos.filter((t) => t.status !== "done").length,
+    all: todos.length,
     overdue: todos.filter((todo) => isOverdue(todo, now)).length,
     active: todos.filter((t) => t.status !== "done").length,
     today: todos.filter((t) => t.status !== "done" && isToday(t.deadline, now))
@@ -572,13 +582,20 @@ export default function App() {
           onArrive={completion.arrive}
         />
       )}
+      {completion.receipt && !view && !completion.current && (
+        <CompletionNotice
+          key={completion.receipt.id}
+          receipt={completion.receipt}
+          onDismiss={completion.dismissReceipt}
+        />
+      )}
       <div
         className="toast-region"
         role="status"
         aria-live="polite"
         aria-atomic="true"
       >
-        {toast && !view && !completion.current && (
+        {toast && !view && !completion.current && !completion.receipt && (
           <div className="toast">
             <span className="toast-icon">
               <Check size={17} />

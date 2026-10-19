@@ -135,7 +135,50 @@ async function finishPhase(index: number) {
   });
 }
 
-describe("完了の紙飛行機演出", () => {
+describe("完了のトド演出", () => {
+  it.each([
+    { remaining: 0, tone: "green", detail: messages.completion.allDone },
+    { remaining: 1, tone: "orange", detail: messages.completion.oneLeft },
+    { remaining: 2, tone: "blue", detail: messages.completion.keepGoing },
+  ])(
+    "残り$remaining件の完了通知を$toneで表示し、通知を閉じられる",
+    async ({ remaining, tone, detail }) => {
+      const others = Array.from({ length: remaining }, (_, index) => ({
+        ...task,
+        id: "other-" + index,
+        title: "other-" + index,
+      }));
+      localStorage.setItem(STORAGE_KEY, serializeTodos([task, ...others]));
+      render(<App />);
+      // Starting in another filter still stages the animation on the unfinished tab.
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: new RegExp("^" + messages.filters.navigation.doing),
+        }),
+      );
+      openTask();
+      complete();
+      await closeTask();
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+        messages.filters.heading.active + remaining,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: messages.completion.skip }),
+      );
+      expect(screen.getByText(messages.completion.title)).toBeTruthy();
+      expect(
+        screen
+          .getByText(detail)
+          .closest(".completion-notice")
+          ?.classList.contains("completion-notice-" + tone),
+      ).toBe(true);
+      expect(counter().textContent).toBe("1");
+      fireEvent.click(
+        screen.getByRole("button", { name: messages.common.closeNotification }),
+      );
+      expect(screen.queryByText(messages.completion.title)).toBeNull();
+    },
+  );
   it("保存と一覧移動は即時、演出は詳細を閉じてから。実際の完了件数の位置へ飛び、到着時に数字が増える", async () => {
     const mounted = render(<App />);
     openTask();
@@ -147,6 +190,9 @@ describe("完了の紙飛行機演出", () => {
     expect(counter().textContent).toBe("0");
     await closeTask();
     expect(plays).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      messages.filters.heading.active + "0",
+    );
     expect(
       screen.queryByRole("button", {
         name: messages.todo.openLabel(task.title),
@@ -157,14 +203,25 @@ describe("完了の紙飛行機演出", () => {
     ).toBeTruthy();
     await finishPhase(0);
     await finishPhase(1);
+    expect(plays[2].frames.at(-1)).toMatchObject({
+      offset: 1,
+      opacity: 0,
+    });
     await finishPhase(2);
-    expect(plays).toHaveLength(4);
+    expect(
+      document.querySelector(".completion-swimmer")?.getAttribute("data-stage"),
+    ).toBe("turn");
+    expect(
+      document.querySelector(".sea-lion-body")?.getAttribute("d"),
+    ).toContain("M16.000 55.000");
+    await finishPhase(3);
+    expect(plays).toHaveLength(5);
     // Counter center (295, 89), stage center (195, 422): no desktop/mobile constants.
-    expect(plays[3].frames.at(-1)?.transform).toContain(
+    expect(plays[4].frames.at(-1)?.transform).toContain(
       "translate(100px, -333px)",
     );
     expect(counter().textContent).toBe("0");
-    await finishPhase(3);
+    await finishPhase(4);
     expect(counter().textContent).toBe("1");
     expect(counter().classList.contains("nav-count-arrived")).toBe(true);
     expect(
@@ -179,10 +236,10 @@ describe("完了の紙飛行機演出", () => {
     );
     mounted.unmount();
     render(<App />);
-    expect(plays).toHaveLength(4);
+    expect(plays).toHaveLength(5);
     expect(counter().textContent).toBe("1");
   });
-  it("飛行中にメニュー位置が変わっても、画面上の新しい位置を追跡する", async () => {
+  it("泳いでいる途中にメニュー位置が変わっても、画面上の新しい位置を追跡する", async () => {
     vi.useFakeTimers();
     render(<App />);
     openTask();
@@ -191,11 +248,12 @@ describe("完了の紙飛行機演出", () => {
     await finishPhase(0);
     await finishPhase(1);
     await finishPhase(2);
+    await finishPhase(3);
     destination = rect(20, 340, 14, 18);
     act(() => vi.advanceTimersByTime(64));
-    const revised = plays[3].setKeyframes.mock.calls.at(-1)?.[0] as Keyframe[];
+    const revised = plays[4].setKeyframes.mock.calls.at(-1)?.[0] as Keyframe[];
     expect(revised.at(-1)?.transform).toContain("translate(-168px, -73px)");
-    await finishPhase(3);
+    await finishPhase(4);
     expect(counter().textContent).toBe("1");
   });
   it("Escで即時終了して件数を反映し、保存済みの完了状態を戻さない", async () => {
@@ -236,7 +294,7 @@ describe("完了の紙飛行機演出", () => {
     await closeTask();
     expect(counter().textContent).toBe("0");
     await act(async () => {
-      vi.advanceTimersByTime(3500);
+      vi.advanceTimersByTime(5000);
     });
     expect(counter().textContent).toBe("1");
     expect(

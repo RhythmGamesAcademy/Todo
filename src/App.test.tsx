@@ -7,6 +7,7 @@ import {
   render,
   screen,
   within,
+  waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
@@ -526,7 +527,7 @@ describe("期限超過メニュー", () => {
     const nav = within(screen.getByRole("navigation", { name: "TODOの表示" }));
     const buttons = nav.getAllByRole("button");
     expect(buttons.slice(0, 3).map((b) => b.textContent)).toEqual([
-      "すべてのTODO3",
+      "すべてのTODO4",
       "期限超過1",
       "未完了3",
     ]);
@@ -575,6 +576,11 @@ describe("直近の期限の表示", () => {
     await user.click(soonButton());
     await user.selectOptions(screen.getByLabelText("状態"), "done");
     await user.click(screen.getByRole("button", { name: "閉じる" }));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+        messages.filters.heading.active + "1",
+      ),
+    );
     expect(
       screen.queryByRole("button", {
         name: messages.todo.openLabel(soon.title),
