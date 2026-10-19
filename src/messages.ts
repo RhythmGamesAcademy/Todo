@@ -234,6 +234,7 @@ export const messages = {
     },
   },
   errors: {
+    invalidState: "共有データを読み込めませんでした",
     invalidBackup: "対応するバックアップ形式ではありません。",
     invalidTodo: "TODOのデータが正しくありません。",
     invalidNote: "メモのデータが正しくありません。",

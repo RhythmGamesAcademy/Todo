@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "format": "prettier --write src vite.config.ts tsconfig.json package.json index.html README.md .github/workflows/pages.yml"
+    "format": "prettier --write src src/cloud/types.ts src/cloud/parse.ts src/cloud/parse.test.ts vite.config.ts tsconfig.json package.json index.html README.md .github/workflows/pages.yml"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

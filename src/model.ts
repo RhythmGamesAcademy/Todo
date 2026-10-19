@@ -156,9 +156,9 @@ export function calendarUrl(todo: Todo, browser = false) {
 export function serializeTodos(todos: Todo[]) {
   return JSON.stringify({ version: 1, todos });
 }
-const record = (x: unknown): x is Record<string, unknown> =>
+export const record = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
-const validDate = (x: unknown): x is string =>
+export const validDate = (x: unknown): x is string =>
   typeof x === "string" && Number.isFinite(Date.parse(x));
 export function parseTodos(raw: string): Todo[] {
   let data: unknown;
