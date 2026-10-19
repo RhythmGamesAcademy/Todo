@@ -19,10 +19,10 @@ import {
   X,
 } from "lucide-react";
 import {
-  clockText,
   FILTER_LABEL,
   isOverdue,
   isToday,
+  nextDeadlineId,
   selectTodos,
 } from "./model";
 import type { Filter, Sort, Todo, TodoDraft } from "./model";
@@ -91,6 +91,7 @@ export default function App() {
     view && (view.type === "detail" || view.type === "edit")
       ? todos.find((t) => t.id === view.id)
       : undefined;
+  const nextDueId = useMemo(() => nextDeadlineId(todos, now), [todos, now]);
   useEffect(() => {
     if (view && (view.type === "detail" || view.type === "edit") && !selected) {
       setView(null);
@@ -187,22 +188,45 @@ export default function App() {
       <a href="#main" className="skip-link">
         {messages.app.skipToMain}
       </a>
-      <aside className="sidebar">
-        <div className="sidebar-top">
-          <div className="brand">
-            <Mark />
-            <span className="brand-name">{messages.app.title}</span>
+      <header className="topbar">
+        <span className="header-glass" aria-hidden="true" />
+        <svg
+          className="header-waves"
+          viewBox="0 0 1600 32"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path d="M-20 20C180 20 280 5 480 13S790 31 1030 15 1380 7 1620 20" />
+          <path
+            className="header-wave-fine"
+            d="M-20 10C180 10 280-5 480 3S790 21 1030 5 1380-3 1620 10"
+          />
+        </svg>
+        <div className="brand">
+          <Mark />
+          <span className="brand-name">{messages.app.title}</span>
+        </div>
+        <div className="header-tools">
+          <div className="clock" aria-label={messages.app.currentTime}>
+            <time dateTime={now.toISOString()}>
+              <span className="clock-date">
+                {messages.dateTime.headerDate(now)}
+              </span>{" "}
+              <span className="clock-time">
+                {messages.dateTime.headerTime(now)}
+              </span>
+            </time>
           </div>
           <button
             className="mobile-data icon-button"
-            onClick={() => {
-              setView({ type: "data" });
-            }}
+            onClick={() => setView({ type: "data" })}
             aria-label={messages.data.title}
           >
             <HardDrive size={21} />
           </button>
         </div>
+      </header>
+      <aside className="sidebar">
         <nav aria-label={messages.app.navigation}>
           <div className="nav-items">
             {filters.map(({ key, icon: Icon }) => (
@@ -236,30 +260,6 @@ export default function App() {
         </div>
       </aside>
       <div className="workspace">
-        <header className="topbar">
-          <svg
-            className="header-waves"
-            viewBox="0 0 1440 140"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M0 72C220 138 400 5 670 69S1110 128 1440 66V140H0Z"
-              fill="#e2f0ff"
-            />
-            <path
-              d="M0 106C300 30 470 139 780 100S1170 30 1440 103V140H0Z"
-              fill="#cfe6ff"
-            />
-            <path
-              d="M0 125C260 81 480 153 790 120S1170 84 1440 119V140H0Z"
-              fill="#b8d9fa"
-            />
-          </svg>
-          <div className="clock" aria-label={messages.app.currentTime}>
-            <time dateTime={now.toISOString()}>{clockText(now)}</time>
-          </div>
-        </header>
         <main id="main" className="main-content" tabIndex={-1}>
           {store.error && (
             <div className="storage-error" role="alert">
@@ -340,6 +340,7 @@ export default function App() {
                     key={todo.id}
                     todo={todo}
                     now={now}
+                    nextDue={todo.id === nextDueId}
                     onOpen={() => {
                       setToast(null);
                       setDirty(false);

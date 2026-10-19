@@ -7,6 +7,7 @@ import {
   serializeTodos,
   toDateInput,
 } from "./model";
+import { nextDeadlineId } from "./model";
 import type { Todo } from "./model";
 const now = new Date("2026-10-18T12:00:00+09:00");
 const make = (
@@ -136,5 +137,46 @@ describe("期限超過の一覧", () => {
     expect(
       selectTodos(list, "overdue", "doing", "deadline", now).map((t) => t.id),
     ).toEqual(["doing"]);
+  });
+});
+
+describe("直近の期限のアクセント", () => {
+  it("完了・期限超過・期限なしを除外し、これからの期限が最も近いTODOを選ぶ", () => {
+    const past = new Date(now.getTime() - 60000).toISOString();
+    const soon = new Date(now.getTime() + 60000).toISOString();
+    const later = new Date(now.getTime() + 3600000).toISOString();
+    const list = [
+      make("past", past),
+      { ...make("done", soon), status: "done" as const },
+      make("none", null),
+      make("later", later),
+      make("soon", soon),
+    ];
+    expect(nextDeadlineId(list, now)).toBe("soon");
+    expect(list.map((t) => t.id)).toEqual([
+      "past",
+      "done",
+      "none",
+      "later",
+      "soon",
+    ]);
+  });
+  it("対象がない場合はアクセントを付けない", () => {
+    expect(nextDeadlineId([], now)).toBeNull();
+    expect(
+      nextDeadlineId(
+        [
+          make("none", null),
+          make("past", new Date(now.getTime() - 1).toISOString()),
+        ],
+        now,
+      ),
+    ).toBeNull();
+  });
+  it("期限が同じ場合も配列の順番によらず1件だけ選ぶ", () => {
+    const a = make("a", now.toISOString());
+    const b = make("b", now.toISOString());
+    expect(nextDeadlineId([a, b], now)).toBe("a");
+    expect(nextDeadlineId([b, a], now)).toBe("a");
   });
 });

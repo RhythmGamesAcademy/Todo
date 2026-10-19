@@ -62,6 +62,23 @@ export function isOverdue(todo: Todo, now: Date) {
     new Date(todo.deadline).getTime() < now.getTime()
   );
 }
+export function nextDeadlineId(todos: Todo[], now: Date): string | null {
+  let next: Todo | undefined;
+  for (const todo of todos) {
+    if (todo.status === "done" || !todo.deadline) continue;
+    const deadline = Date.parse(todo.deadline);
+    if (deadline < now.getTime() || !Number.isFinite(deadline)) continue;
+    if (
+      !next ||
+      deadline < Date.parse(next.deadline!) ||
+      (deadline === Date.parse(next.deadline!) &&
+        (todo.createdAt.localeCompare(next.createdAt) ||
+          todo.id.localeCompare(next.id)) < 0)
+    )
+      next = todo;
+  }
+  return next?.id ?? null;
+}
 export function selectTodos(
   todos: Todo[],
   filter: Filter,

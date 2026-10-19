@@ -63,6 +63,7 @@ export const messages = {
     priority: "優先度",
     state: "状態",
     overdue: "期限超過",
+    nextDeadline: "直近の期限",
     today: "今日",
     details: "TODOの内容",
     open: "詳細を開く",
@@ -235,6 +236,20 @@ export const messages = {
     save: "保存できませんでした。保存容量やブラウザの設定を確認してください。変更は保存されていません。",
   },
   dateTime: {
+    headerDate: (d: Date) =>
+      d.getFullYear() +
+      "年" +
+      pad(d.getMonth() + 1) +
+      "月" +
+      pad(d.getDate()) +
+      "日",
+    headerTime: (d: Date) =>
+      pad(d.getHours()) +
+      "時" +
+      pad(d.getMinutes()) +
+      "分" +
+      pad(d.getSeconds()) +
+      "秒",
     clock: (d: Date) =>
       d.getFullYear() +
       "年" +

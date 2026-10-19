@@ -351,3 +351,39 @@ describe("期限超過メニュー", () => {
       ).toBeNull();
   });
 });
+
+describe("直近の期限の表示", () => {
+  it("優先度順でも直近の期限を示し、そのTODOを完了すると次の期限へ移る", async () => {
+    const current = Date.now();
+    const soon = {
+      ...task(),
+      id: "soon",
+      title: "直近の課題",
+      priority: "low" as const,
+      deadline: new Date(current + 3600000).toISOString(),
+    };
+    const later = {
+      ...task(),
+      id: "later",
+      title: "次の課題",
+      priority: "high" as const,
+      deadline: new Date(current + 7200000).toISOString(),
+    };
+    localStorage.setItem(STORAGE_KEY, serializeTodos([soon, later]));
+    const user = userEvent.setup();
+    render(<App />);
+    const soonButton = () =>
+      screen.getByRole("button", { name: "直近の課題の詳細を開く" });
+    const laterButton = () =>
+      screen.getByRole("button", { name: "次の課題の詳細を開く" });
+    expect(soonButton().getAttribute("aria-description")).toBe("直近の期限");
+    expect(laterButton().getAttribute("aria-description")).toBeNull();
+    await user.selectOptions(screen.getByLabelText("並べ替え"), "priority");
+    expect(soonButton().getAttribute("aria-description")).toBe("直近の期限");
+    await user.click(soonButton());
+    await user.selectOptions(screen.getByLabelText("状態"), "done");
+    await user.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(soonButton().getAttribute("aria-description")).toBeNull();
+    expect(laterButton().getAttribute("aria-description")).toBe("直近の期限");
+  });
+});

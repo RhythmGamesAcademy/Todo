@@ -110,20 +110,25 @@ export function TodoCard({
   todo,
   now,
   onOpen,
+  nextDue = false,
 }: {
   todo: Todo;
   now: Date;
   onOpen: () => void;
+  nextDue?: boolean;
 }) {
   const overdue = isOverdue(todo, now);
   const latest = todo.notes.at(-1);
   return (
     <button
       className={
-        "todo-card group " + (todo.status === "done" ? "card-done" : "")
+        "todo-card group " +
+        (todo.status === "done" ? "card-done " : "") +
+        (nextDue ? "card-next-deadline" : "")
       }
       onClick={onOpen}
       aria-label={messages.todo.openLabel(todo.title)}
+      aria-description={nextDue ? messages.todo.nextDeadline : undefined}
     >
       <div className="flex items-center justify-between gap-3">
         <span className={"status-badge status-" + todo.status}>
@@ -143,7 +148,12 @@ export function TodoCard({
       </div>
       <h3>{todo.title}</h3>
       <p className="card-description line-clamp-2">{todo.description}</p>
-      <div className={"card-date " + (overdue ? "overdue" : "")}>
+      <div
+        className={
+          "card-date " +
+          (overdue ? "overdue" : nextDue ? "next-deadline-date" : "")
+        }
+      >
         <CalendarDays size={15} />
         <span>
           {todo.deadline
@@ -419,6 +429,7 @@ export function TodoDetail({
   onDirty: (dirty: boolean) => void;
 }) {
   const [text, setText] = useState("");
+  const [sentId, setSentId] = useState<string | null>(null);
   const thread = useRef<HTMLOListElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const scrollAfterSend = useRef(true);
@@ -453,8 +464,9 @@ export function TodoDetail({
       )
     ) {
       scrollAfterSend.current = true;
+      setSentId(note.id);
       setText("");
-      composer.current?.focus();
+      composer.current?.focus({ preventScroll: true });
     }
   }
   return (
@@ -518,65 +530,73 @@ export function TodoDetail({
           <h3 id="notes-heading">{messages.chat.title}</h3>
           <span>{todo.notes.length}</span>
         </div>
-        <ol
-          ref={thread}
-          className="chat-thread"
-          aria-label={messages.chat.history}
-          tabIndex={todo.notes.length ? 0 : undefined}
-        >
-          {todo.notes.map((note) => (
-            <li key={note.id} className="chat-message">
-              <span className="avatar" aria-hidden="true">
-                <UserRound size={21} strokeWidth={1.7} />
+        <div className="chat-well">
+          <ol
+            ref={thread}
+            className="chat-thread"
+            aria-label={messages.chat.history}
+            tabIndex={todo.notes.length ? 0 : undefined}
+          >
+            {todo.notes.map((note) => (
+              <li
+                key={note.id}
+                className={
+                  "chat-message " +
+                  (note.id === sentId ? "chat-message-new" : "")
+                }
+              >
+                <span className="avatar" aria-hidden="true">
+                  <UserRound size={21} strokeWidth={1.7} />
+                </span>
+                <div className="message-content">
+                  <span className="message-name">{messages.chat.self}</span>
+                  <time className="message-time" dateTime={note.createdAt}>
+                    {clockText(new Date(note.createdAt))}
+                  </time>
+                  <p className="message-text">{note.text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <form className="chat-composer" onSubmit={post}>
+            <label htmlFor="new-note" className="sr-only">
+              {messages.chat.input}
+            </label>
+            <textarea
+              ref={composer}
+              id="new-note"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={messages.chat.input}
+              maxLength={2000}
+              rows={2}
+              onKeyDown={(e) => {
+                if (
+                  (e.ctrlKey || e.metaKey) &&
+                  e.key === "Enter" &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  post();
+                }
+              }}
+            />
+            <div className="composer-actions">
+              <span className="char-count">
+                {messages.common.characters(text.length, 2000)}
               </span>
-              <div className="message-content">
-                <span className="message-name">{messages.chat.self}</span>
-                <time className="message-time" dateTime={note.createdAt}>
-                  {clockText(new Date(note.createdAt))}
-                </time>
-                <p className="message-text">{note.text}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <form className="chat-composer" onSubmit={post}>
-          <label htmlFor="new-note" className="sr-only">
-            {messages.chat.input}
-          </label>
-          <textarea
-            ref={composer}
-            id="new-note"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={messages.chat.input}
-            maxLength={2000}
-            rows={2}
-            onKeyDown={(e) => {
-              if (
-                (e.ctrlKey || e.metaKey) &&
-                e.key === "Enter" &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                post();
-              }
-            }}
-          />
-          <div className="composer-actions">
-            <span className="char-count">
-              {messages.common.characters(text.length, 2000)}
-            </span>
-            <button
-              type="submit"
-              className="send-button"
-              disabled={!text.trim()}
-              aria-label={messages.chat.send}
-              title={messages.chat.sendShortcut}
-            >
-              <ArrowUp size={20} />
-            </button>
-          </div>
-        </form>
+              <button
+                type="submit"
+                className="send-button"
+                disabled={!text.trim()}
+                aria-label={messages.chat.send}
+                title={messages.chat.sendShortcut}
+              >
+                <ArrowUp size={20} />
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
       <footer className="detail-footer">
         <button className="text-button danger-text" onClick={onDelete}>
