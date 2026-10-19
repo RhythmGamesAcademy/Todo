@@ -108,6 +108,16 @@ Hobbyプランは非商用の個人利用向けで、無料枠の上限があり
 
 Viteのbaseを相対パスにしているため、リポジトリ配下でも動作します。ルーティングは単一ページ内で完結し、サーバーのリライト設定は不要です。
 
+## データベース（クラウド版）
+
+Neon の dev ブランチを用意し、接続文字列を `DATABASE_URL` に設定してスキーマを適用します。
+
+```sh
+psql "$DATABASE_URL" -f db/schema.sql
+```
+
+`db/schema.sql` は lists / users / todos / memos / activities の5テーブルと、書き込み時に lists.revision を進めるトリガーを作成します。本番ブランチへの適用は仕上げフェーズで行います。
+
 ## 技術構成
 
 React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest。
