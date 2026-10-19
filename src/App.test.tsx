@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { messages } from "./messages";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
 
@@ -47,9 +48,17 @@ describe("一覧の表示形式", () => {
     const original = localStorage.getItem(STORAGE_KEY);
     const user = userEvent.setup();
     const mounted = render(<App />);
-    await user.type(screen.getByLabelText("TODO・メモを検索"), "授業");
-    await user.selectOptions(screen.getByLabelText("並べ替え"), "priority");
-    await user.click(screen.getByRole("button", { name: "簡潔" }));
+    await user.type(
+      screen.getByRole("searchbox", { name: messages.search.label }),
+      "授業",
+    );
+    await user.selectOptions(
+      screen.getByLabelText(messages.search.sort),
+      "priority",
+    );
+    await user.click(
+      screen.getByRole("button", { name: messages.layout.compact }),
+    );
     const row = screen.getByRole("button", { name: "授業の課題の詳細を開く" });
     expect(row.classList.contains("todo-compact")).toBe(true);
     expect(within(row).getByText("TODOアプリを作る")).toBeTruthy();
@@ -58,24 +67,29 @@ describe("一覧の表示形式", () => {
     expect(within(row).queryByText("一覧には不要な進捗メモ")).toBeNull();
     expect(within(row).queryByText("詳細を開く")).toBeNull();
     expect(row.querySelector(".card-date")?.textContent).toContain("10月30日");
-    expect(screen.getByLabelText("TODO・メモを検索")).toHaveProperty(
-      "value",
-      "授業",
-    );
-    expect(screen.getByLabelText("並べ替え")).toHaveProperty(
+    expect(
+      screen.getByRole("searchbox", { name: messages.search.label }),
+    ).toHaveProperty("value", "授業");
+    expect(screen.getByLabelText(messages.search.sort)).toHaveProperty(
       "value",
       "priority",
     );
     await user.click(row);
     expect(screen.getByRole("dialog")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "閉じる" }));
+    await user.click(
+      screen.getByRole("button", { name: messages.common.close }),
+    );
     expect(localStorage.getItem(STORAGE_KEY)).toBe(original);
     mounted.unmount();
     render(<App />);
     expect(
-      screen.getByRole("button", { name: "簡潔" }).getAttribute("aria-pressed"),
+      screen
+        .getByRole("button", { name: messages.layout.compact })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
-    await user.click(screen.getByRole("button", { name: "カード" }));
+    await user.click(
+      screen.getByRole("button", { name: messages.layout.cards }),
+    );
     expect(screen.getByText("一覧には不要な進捗メモ")).toBeTruthy();
   });
 });
