@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "format": "prettier --write src src/cloud/types.ts src/cloud/parse.ts src/cloud/parse.test.ts api/src/sql.ts vite.config.ts tsconfig.json package.json index.html README.md .github/workflows/pages.yml"
+    "format": "prettier --write --ignore-unknown src src/cloud/types.ts src/cloud/parse.ts src/cloud/parse.test.ts api/src/*.ts api/index.ts db/schema.sql vite.config.ts tsconfig.json package.json index.html README.md .github/workflows/pages.yml"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",
