@@ -8,9 +8,15 @@ import type {
   CloudState,
   CloudTodo,
   CloudUser,
+  TodoPatch,
 } from "../../src/cloud/types";
-import { ApiException, assertText, generateToken } from "./domain";
-import type { Sql, Transact } from "./sql";
+import {
+  ApiException,
+  assertText,
+  computeActivities,
+  generateToken,
+} from "./domain";
+import type { Sql, SqlCall, Transact } from "./sql";
 
 export interface AppDeps {
   sql: Sql;
@@ -41,6 +47,15 @@ interface TodoRow {
   updated_at: unknown;
 }
 
+interface TodoRecordRow extends TodoRow {
+  deleted_at: unknown;
+}
+
+interface UserRefRow {
+  id: string;
+  name: string;
+}
+
 interface MemoRow {
   id: string;
   todo_id: string;
@@ -64,10 +79,81 @@ const rowsOf = <T>(result: { rows: unknown[] }): T[] => result.rows as T[];
 const toIso = (value: unknown): string =>
   (value instanceof Date ? value : new Date(String(value))).toISOString();
 
+const toCloudTodo = (row: TodoRow): CloudTodo => ({
+  id: row.id,
+  title: row.title,
+  description: row.description,
+  deadline: row.due === null ? null : toIso(row.due),
+  priority: row.priority as Priority,
+  status: row.status as Status,
+  assigneeId: row.assignee_id,
+  createdAt: toIso(row.created_at),
+  updatedAt: toIso(row.updated_at),
+  notes: [],
+});
+
+const STATUSES: readonly Status[] = ["todo", "doing", "done"];
+const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+
+const parseEnum = <T extends string>(
+  value: unknown,
+  values: readonly T[],
+  field: string,
+): T => {
+  if (
+    typeof value !== "string" ||
+    !(values as readonly string[]).includes(value)
+  )
+    throw new ApiException(400, `${field} is invalid`);
+  return value as T;
+};
+
+const parseDeadline = (value: unknown): string | null => {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    !ISO_TIMESTAMP.test(value) ||
+    Number.isNaN(Date.parse(value))
+  )
+    throw new ApiException(400, "deadline must be an ISO timestamp or null");
+  return new Date(value).toISOString();
+};
+
+const parseDescription = (value: unknown): string => {
+  if (typeof value !== "string")
+    throw new ApiException(400, "description must be a string");
+  const text = value.trim();
+  if (text.length > 2000)
+    throw new ApiException(400, "description must be at most 2000 characters");
+  return text;
+};
+
+const parseUserId = (value: unknown, field: string): string => {
+  if (typeof value !== "string" || !value.trim())
+    throw new ApiException(400, `${field} must be a user id`);
+  return value;
+};
+
 async function readJson(c: Context): Promise<Record<string, unknown>> {
   let body: unknown;
   try {
     body = await c.req.json();
+  } catch {
+    throw new ApiException(400, "invalid JSON body");
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    throw new ApiException(400, "invalid JSON body");
+  return body as Record<string, unknown>;
+}
+
+async function readOptionalJson(c: Context): Promise<Record<string, unknown>> {
+  const text = await c.req.text();
+  if (!text.trim()) return {};
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
   } catch {
     throw new ApiException(400, "invalid JSON body");
   }
@@ -87,6 +173,74 @@ export function createApp({ sql, transact }: AppDeps): Hono {
   };
 
   const notFound = (c: Context) => c.json({ error: "not found" }, 404);
+
+  const findUser = async (
+    listId: string,
+    userId: string,
+  ): Promise<UserRefRow | null> => {
+    const [user] = rowsOf<UserRefRow>(
+      await sql`SELECT id, name FROM users WHERE list_id = ${listId} AND id = ${userId}`,
+    );
+    return user ?? null;
+  };
+
+  const requireUser = async (
+    listId: string,
+    userId: string,
+  ): Promise<UserRefRow> => {
+    const user = await findUser(listId, userId);
+    if (!user) throw new ApiException(404, "user not found");
+    return user;
+  };
+
+  // API v1 には認証済み呼び出し元の概念がないため、クライアントが任意で
+  // userId を送る。リスト内の実ユーザーだけを受け付け、未指定なら NULL。
+  const readOptionalUserId = async (
+    body: Record<string, unknown>,
+    listId: string,
+  ): Promise<string | null> => {
+    if (body.userId === undefined || body.userId === null) return null;
+    const id = parseUserId(body.userId, "userId");
+    await requireUser(listId, id);
+    return id;
+  };
+
+  const readRevision = async (listId: string): Promise<number> => {
+    const [row] = rowsOf<{ revision: string | number }>(
+      await sql`SELECT revision FROM lists WHERE id = ${listId}`,
+    );
+    if (!row) throw new ApiException(404, "list not found");
+    return Number(row.revision);
+  };
+
+  const findTodo = async (
+    listId: string,
+    id: string,
+  ): Promise<TodoRecordRow | null> => {
+    const [todo] = rowsOf<TodoRecordRow>(
+      await sql`
+        SELECT id, title, description, status, priority, due, assignee_id,
+               created_at, updated_at, deleted_at
+        FROM todos
+        WHERE id = ${id} AND list_id = ${listId}
+      `,
+    );
+    return todo ?? null;
+  };
+
+  const addActivity = (
+    listId: string,
+    todoId: string | null,
+    userId: string | null,
+    kind: ActivityKind,
+    field: string | null,
+    before: string | null,
+    after: string | null,
+  ): SqlCall =>
+    sql`
+      INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after)
+      VALUES (${randomUUID()}, ${listId}, ${todoId}, ${userId}, ${kind}, ${field}, ${before}, ${after})
+    `;
 
   app.post("/api/lists", async (c) => {
     const body = await readJson(c);
@@ -141,6 +295,208 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     return c.json({ userId: user.id, name });
   });
 
+  app.post("/api/lists/:token/todos", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const body = await readJson(c);
+
+    const title = assertText(body.title, 120, "title");
+    const description =
+      body.description === undefined ? "" : parseDescription(body.description);
+    const deadline =
+      body.deadline === undefined ? null : parseDeadline(body.deadline);
+    const status = parseEnum(body.status, STATUSES, "status");
+    const priority = parseEnum(body.priority, PRIORITIES, "priority");
+    const assigneeId =
+      body.assigneeId === undefined || body.assigneeId === null
+        ? null
+        : (
+            await requireUser(
+              list.id,
+              parseUserId(body.assigneeId, "assigneeId"),
+            )
+          ).id;
+    const userId = await readOptionalUserId(body, list.id);
+
+    const id = randomUUID();
+    await transact([
+      sql`
+        INSERT INTO todos (id, list_id, title, description, status, priority, due, assignee_id)
+        VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${assigneeId})
+      `,
+      addActivity(list.id, id, userId, "todo.created", null, null, title),
+    ]);
+    return c.json({ id }, 201);
+  });
+
+  app.patch("/api/lists/:token/todos/:id", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findTodo(list.id, c.req.param("id"));
+    if (!row || row.deleted_at !== null) return notFound(c);
+    const body = await readJson(c);
+
+    const patch: TodoPatch = {};
+    if (body.title !== undefined)
+      patch.title = assertText(body.title, 120, "title");
+    if (body.description !== undefined)
+      patch.description = parseDescription(body.description);
+    if (body.deadline !== undefined)
+      patch.deadline = parseDeadline(body.deadline);
+    if (body.status !== undefined)
+      patch.status = parseEnum(body.status, STATUSES, "status");
+    if (body.priority !== undefined)
+      patch.priority = parseEnum(body.priority, PRIORITIES, "priority");
+
+    let assigneeAfter: UserRefRow | null | undefined;
+    if (body.assigneeId !== undefined) {
+      assigneeAfter =
+        body.assigneeId === null
+          ? null
+          : await requireUser(
+              list.id,
+              parseUserId(body.assigneeId, "assigneeId"),
+            );
+      patch.assigneeId = assigneeAfter ? assigneeAfter.id : null;
+    }
+    const userId = await readOptionalUserId(body, list.id);
+
+    const before = toCloudTodo(row);
+    const assigneeChanged =
+      patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId;
+    let assigneeNameBefore: string | null = null;
+    if (assigneeChanged && before.assigneeId) {
+      assigneeNameBefore =
+        (await findUser(list.id, before.assigneeId))?.name ?? null;
+    }
+    const assigneeNameAfter = assigneeChanged
+      ? (assigneeAfter?.name ?? null)
+      : null;
+    const changes = computeActivities(
+      before,
+      patch,
+      assigneeNameAfter,
+      assigneeNameBefore,
+    );
+
+    if (changes.length === 0)
+      return c.json({ revision: await readRevision(list.id) });
+
+    const has = {
+      title: patch.title !== undefined,
+      description: patch.description !== undefined,
+      deadline: patch.deadline !== undefined,
+      status: patch.status !== undefined,
+      priority: patch.priority !== undefined,
+      assignee: patch.assigneeId !== undefined,
+    };
+    const nextDeadline =
+      patch.deadline !== undefined ? patch.deadline : before.deadline;
+    const nextAssigneeId =
+      patch.assigneeId !== undefined ? patch.assigneeId : before.assigneeId;
+
+    await transact([
+      sql`
+        UPDATE todos SET
+          title = CASE WHEN ${has.title} THEN ${patch.title ?? before.title} ELSE title END,
+          description = CASE WHEN ${has.description} THEN ${patch.description ?? before.description} ELSE description END,
+          due = CASE WHEN ${has.deadline} THEN ${nextDeadline}::timestamptz ELSE due END,
+          status = CASE WHEN ${has.status} THEN ${patch.status ?? before.status} ELSE status END,
+          priority = CASE WHEN ${has.priority} THEN ${patch.priority ?? before.priority} ELSE priority END,
+          assignee_id = CASE WHEN ${has.assignee} THEN ${nextAssigneeId}::uuid ELSE assignee_id END,
+          updated_at = now()
+        WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NULL
+      `,
+      ...changes.map((change) =>
+        addActivity(
+          list.id,
+          row.id,
+          userId,
+          "todo.updated",
+          change.field,
+          change.before,
+          change.after,
+        ),
+      ),
+    ]);
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
+  app.delete("/api/lists/:token/todos/:id", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findTodo(list.id, c.req.param("id"));
+    if (!row) return notFound(c);
+    const body = await readOptionalJson(c);
+    const userId = await readOptionalUserId(body, list.id);
+
+    if (row.deleted_at !== null)
+      return c.json({ revision: await readRevision(list.id) });
+
+    await transact([
+      sql`
+        UPDATE todos SET deleted_at = now()
+        WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NULL
+      `,
+      addActivity(
+        list.id,
+        row.id,
+        userId,
+        "todo.deleted",
+        null,
+        row.title,
+        null,
+      ),
+    ]);
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
+  app.post("/api/lists/:token/todos/:id/restore", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findTodo(list.id, c.req.param("id"));
+    if (!row) return notFound(c);
+    const body = await readOptionalJson(c);
+    const userId = await readOptionalUserId(body, list.id);
+
+    if (row.deleted_at === null)
+      return c.json({ revision: await readRevision(list.id) });
+
+    await transact([
+      sql`
+        UPDATE todos SET deleted_at = NULL, updated_at = now()
+        WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NOT NULL
+      `,
+      addActivity(
+        list.id,
+        row.id,
+        userId,
+        "todo.restored",
+        null,
+        row.title,
+        null,
+      ),
+    ]);
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
+  app.post("/api/lists/:token/todos/:id/memos", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findTodo(list.id, c.req.param("id"));
+    if (!row || row.deleted_at !== null) return notFound(c);
+    const body = await readJson(c);
+
+    const text = assertText(body.body, 2000, "body");
+    const userId = await readOptionalUserId(body, list.id);
+    const id = randomUUID();
+    await sql`
+      INSERT INTO memos (id, todo_id, user_id, body)
+      VALUES (${id}, ${row.id}, ${userId}, ${text})
+    `;
+    return c.json({ id }, 201);
+  });
+
   app.get("/api/lists/:token", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
@@ -177,15 +533,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
         createdAt: toIso(user.created_at),
       })),
       todos: rowsOf<TodoRow>(todosResult).map((todo): CloudTodo => ({
-        id: todo.id,
-        title: todo.title,
-        description: todo.description,
-        deadline: todo.due === null ? null : toIso(todo.due),
-        priority: todo.priority as Priority,
-        status: todo.status as Status,
-        assigneeId: todo.assignee_id,
-        createdAt: toIso(todo.created_at),
-        updatedAt: toIso(todo.updated_at),
+        ...toCloudTodo(todo),
         notes: notesByTodo.get(todo.id) ?? [],
       })),
       activities: rowsOf<ActivityRow>(activitiesResult).map(
