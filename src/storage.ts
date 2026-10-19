@@ -2,6 +2,28 @@ import { messages } from "./messages";
 import { useEffect, useState } from "react";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
+type TodoLayout = "cards" | "compact";
+const LAYOUT_KEY = "todo:layout";
+export function useTodoLayout() {
+  const [layout, setLayout] = useState<TodoLayout>(() => {
+    try {
+      return localStorage.getItem(LAYOUT_KEY) === "compact"
+        ? "compact"
+        : "cards";
+    } catch {
+      return "cards";
+    }
+  });
+  function changeLayout(value: TodoLayout) {
+    setLayout(value);
+    try {
+      localStorage.setItem(LAYOUT_KEY, value);
+    } catch {
+      // A display preference must not prevent using the TODO data.
+    }
+  }
+  return [layout, changeLayout] as const;
+}
 interface Stored {
   todos: Todo[];
   recovery: string | null;

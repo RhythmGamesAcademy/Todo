@@ -12,6 +12,7 @@ import {
   CalendarClock,
   HardDrive,
   LayoutGrid,
+  List,
   LoaderCircle,
   LockKeyhole,
   Plus,
@@ -26,7 +27,7 @@ import {
   selectTodos,
 } from "./model";
 import type { Filter, Sort, Todo, TodoDraft } from "./model";
-import { useTodoStore } from "./storage";
+import { useTodoLayout, useTodoStore } from "./storage";
 import { DataPanel } from "./DataPanel";
 import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
@@ -39,6 +40,7 @@ type Confirm = AskOptions & { resolve: (answer: boolean) => void };
 export default function App() {
   const store = useTodoStore();
   const { todos } = store;
+  const [layout, changeLayout] = useTodoLayout();
   const [now, setNow] = useState(() => new Date());
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("deadline");
@@ -316,30 +318,55 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <div className="sort-wrap">
-                <ArrowDownUp size={17} />
-                <label htmlFor="todo-sort">{messages.search.sort}</label>
-                <select
-                  id="todo-sort"
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as Sort)}
+              <div className="list-controls">
+                <div className="sort-wrap">
+                  <ArrowDownUp size={17} />
+                  <label htmlFor="todo-sort">{messages.search.sort}</label>
+                  <select
+                    id="todo-sort"
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as Sort)}
+                  >
+                    <option value="deadline">
+                      {messages.search.deadlineOrder}
+                    </option>
+                    <option value="priority">
+                      {messages.search.priorityOrder}
+                    </option>
+                  </select>
+                </div>
+                <div
+                  className="layout-switch"
+                  role="group"
+                  aria-label={messages.layout.label}
                 >
-                  <option value="deadline">
-                    {messages.search.deadlineOrder}
-                  </option>
-                  <option value="priority">
-                    {messages.search.priorityOrder}
-                  </option>
-                </select>
+                  <button
+                    type="button"
+                    aria-pressed={layout === "cards"}
+                    onClick={() => changeLayout("cards")}
+                  >
+                    <LayoutGrid size={16} />
+                    {messages.layout.cards}
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={layout === "compact"}
+                    onClick={() => changeLayout("compact")}
+                  >
+                    <List size={17} />
+                    {messages.layout.compact}
+                  </button>
+                </div>
               </div>
             </div>
             {visible.length ? (
-              <div className="todo-grid">
+              <div className={layout === "compact" ? "todo-list" : "todo-grid"}>
                 {visible.map((todo) => (
                   <TodoCard
                     key={todo.id}
                     todo={todo}
                     now={now}
+                    compact={layout === "compact"}
                     nextDue={todo.id === nextDueId}
                     onOpen={() => {
                       setToast(null);

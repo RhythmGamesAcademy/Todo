@@ -49,6 +49,11 @@ export const messages = {
     deadlineOrder: "期限が近い順",
     priorityOrder: "優先度が高い順",
   },
+  layout: {
+    label: "一覧の表示形式",
+    cards: "カード",
+    compact: "簡潔",
+  },
   todo: {
     create: "新しいTODO",
     createAction: "TODOを作成",
@@ -110,6 +115,7 @@ export const messages = {
     send: "送信",
     sendShortcut: "送信（Ctrl+Enter / ⌘+Enter）",
     sent: "送信しました",
+    revealing: "メモを表示中",
   },
   calendar: {
     register: "Googleカレンダーに登録",

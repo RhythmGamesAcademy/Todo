@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -31,7 +32,123 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("一覧の表示形式", () => {
+  it("簡潔表示は必要な項目だけを表示し、検索・並び順を維持して詳細を開く。表示形式を再読み込み後も保つ", async () => {
+    const t = task();
+    t.notes = [
+      { id: "memo", text: "一覧には不要な進捗メモ", createdAt: t.createdAt },
+    ];
+    localStorage.setItem(STORAGE_KEY, serializeTodos([t]));
+    const original = localStorage.getItem(STORAGE_KEY);
+    const user = userEvent.setup();
+    const mounted = render(<App />);
+    await user.type(screen.getByLabelText("TODO・メモを検索"), "授業");
+    await user.selectOptions(screen.getByLabelText("並べ替え"), "priority");
+    await user.click(screen.getByRole("button", { name: "簡潔" }));
+    const row = screen.getByRole("button", { name: "授業の課題の詳細を開く" });
+    expect(row.classList.contains("todo-compact")).toBe(true);
+    expect(within(row).getByText("TODOアプリを作る")).toBeTruthy();
+    expect(within(row).getByText("優先度 高")).toBeTruthy();
+    expect(within(row).queryByText("進行中")).toBeNull();
+    expect(within(row).queryByText("一覧には不要な進捗メモ")).toBeNull();
+    expect(within(row).queryByText("詳細を開く")).toBeNull();
+    expect(row.querySelector(".card-date")?.textContent).toContain("10月30日");
+    expect(screen.getByLabelText("TODO・メモを検索")).toHaveProperty(
+      "value",
+      "授業",
+    );
+    expect(screen.getByLabelText("並べ替え")).toHaveProperty(
+      "value",
+      "priority",
+    );
+    await user.click(row);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(original);
+    mounted.unmount();
+    render(<App />);
+    expect(
+      screen.getByRole("button", { name: "簡潔" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    await user.click(screen.getByRole("button", { name: "カード" }));
+    expect(screen.getByText("一覧には不要な進捗メモ")).toBeTruthy();
+  });
+});
+
+describe("メモの表示演出", () => {
+  function motion(reduced: boolean) {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: reduced,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  }
+  function send(text: string) {
+    fireEvent.change(screen.getByLabelText("メモを入力"), {
+      target: { value: text },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+  }
+  it("保存は即時に完了し、連続送信した各メモがそれぞれ点から本文へ変わる。途中で閉じても保存済みメモは残る", () => {
+    vi.useFakeTimers();
+    motion(false);
+    seed();
+    const mounted = render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    send("最初のメモ");
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes[0].text,
+    ).toBe("最初のメモ");
+    act(() => vi.advanceTimersByTime(200));
+    send("次のメモ");
+    expect(
+      screen.getAllByRole("status", { name: "メモを表示中" }),
+    ).toHaveLength(2);
+    const thread = () =>
+      within(screen.getByRole("list", { name: "メモの履歴" }));
+    expect(thread().queryByText("最初のメモ")).toBeNull();
+    act(() => vi.advanceTimersByTime(220));
+    expect(thread().getByText("最初のメモ")).toBeTruthy();
+    expect(
+      screen.getAllByRole("status", { name: "メモを表示中" }),
+    ).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(200));
+    expect(thread().getByText("次のメモ")).toBeTruthy();
+    send("演出中に閉じたメモ");
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    mounted.unmount();
+    render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    expect(thread().getByText("演出中に閉じたメモ")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
+  });
+  it("動きを減らす設定では点の待ち時間を省略し、すぐ本文を表示する", () => {
+    motion(true);
+    seed();
+    render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    send("すぐ表示するメモ");
+    expect(
+      within(screen.getByRole("list", { name: "メモの履歴" })).getByText(
+        "すぐ表示するメモ",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
+  });
 });
 const task = (): Todo => ({
   id: "task",

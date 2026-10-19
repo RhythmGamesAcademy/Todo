@@ -111,11 +111,13 @@ export function TodoCard({
   now,
   onOpen,
   nextDue = false,
+  compact = false,
 }: {
   todo: Todo;
   now: Date;
   onOpen: () => void;
   nextDue?: boolean;
+  compact?: boolean;
 }) {
   const overdue = isOverdue(todo, now);
   const latest = todo.notes.at(-1);
@@ -123,6 +125,7 @@ export function TodoCard({
     <button
       className={
         "todo-card group " +
+        (compact ? "todo-compact " : "") +
         (todo.status === "done" ? "card-done " : "") +
         (nextDue ? "card-next-deadline" : "")
       }
@@ -130,24 +133,34 @@ export function TodoCard({
       aria-label={messages.todo.openLabel(todo.title)}
       aria-description={nextDue ? messages.todo.nextDeadline : undefined}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className={"status-badge status-" + todo.status}>
-          {todo.status === "done" ? (
-            <CheckCheck size={14} />
-          ) : todo.status === "doing" ? (
-            <span className="status-dot" />
-          ) : (
-            <Circle size={12} />
-          )}{" "}
-          {STATUS[todo.status]}
-        </span>
+      <div className="card-meta flex items-center justify-between gap-3">
+        {!compact && (
+          <span className={"status-badge status-" + todo.status}>
+            {todo.status === "done" ? (
+              <CheckCheck size={14} />
+            ) : todo.status === "doing" ? (
+              <span className="status-dot" />
+            ) : (
+              <Circle size={12} />
+            )}{" "}
+            {STATUS[todo.status]}
+          </span>
+        )}
         <span className={"priority priority-" + todo.priority}>
           <Flag size={13} />
           {messages.todo.priorityLabel(PRIORITY[todo.priority])}
         </span>
       </div>
-      <h3>{todo.title}</h3>
-      <p className="card-description line-clamp-2">{todo.description}</p>
+      <div className="card-summary">
+        <h3>{todo.title}</h3>
+        <p
+          className={
+            "card-description " + (compact ? "line-clamp-1" : "line-clamp-2")
+          }
+        >
+          {todo.description}
+        </p>
+      </div>
       <div
         className={
           "card-date " +
@@ -169,19 +182,21 @@ export function TodoCard({
           <span className="due-label today-label">{messages.todo.today}</span>
         ) : null}
       </div>
-      {latest && (
+      {!compact && latest && (
         <div className="card-note">
           <MessageSquare size={15} />
           <span className="line-clamp-1">{latest.text}</span>
         </div>
       )}
-      <div className="card-footer">
-        <span>{messages.todo.noteCount(todo.notes.length)}</span>
-        <span className="card-open">
-          {messages.todo.open}
-          <ArrowUpRight size={16} />
-        </span>
-      </div>
+      {!compact && (
+        <div className="card-footer">
+          <span>{messages.todo.noteCount(todo.notes.length)}</span>
+          <span className="card-open">
+            {messages.todo.open}
+            <ArrowUpRight size={16} />
+          </span>
+        </div>
+      )}
     </button>
   );
 }
@@ -413,6 +428,71 @@ export interface AskOptions {
   cancel?: string;
   danger?: boolean;
 }
+function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
+  const [pending, setPending] = useState(
+    () =>
+      enter && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+  );
+  const row = useRef<HTMLLIElement>(null);
+  const followReveal = useRef(false);
+  useEffect(() => {
+    if (!pending) {
+      if (followReveal.current) {
+        const list = row.current?.closest("ol");
+        list?.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+        followReveal.current = false;
+      }
+      return;
+    }
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    function reveal() {
+      const list = row.current?.closest("ol");
+      followReveal.current =
+        !!list && list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+      setPending(false);
+    }
+    const timer = window.setTimeout(reveal, 420);
+    const reduceMotion = () => {
+      if (motion?.matches) setPending(false);
+    };
+    motion?.addEventListener?.("change", reduceMotion);
+    return () => {
+      window.clearTimeout(timer);
+      motion?.removeEventListener?.("change", reduceMotion);
+    };
+  }, [pending]);
+  return (
+    <li
+      ref={row}
+      className={"chat-message " + (enter ? "chat-message-new" : "")}
+    >
+      <span className="avatar" aria-hidden="true">
+        <UserRound size={21} strokeWidth={1.7} />
+      </span>
+      <div className="message-content">
+        <span className="message-name">{messages.chat.self}</span>
+        <time className="message-time" dateTime={note.createdAt}>
+          {clockText(new Date(note.createdAt))}
+        </time>
+        {pending ? (
+          <span
+            className="message-dots"
+            role="status"
+            aria-label={messages.chat.revealing}
+          >
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+          </span>
+        ) : (
+          <p className={"message-text " + (enter ? "message-text-reveal" : "")}>
+            {note.text}
+          </p>
+        )}
+      </div>
+    </li>
+  );
+}
 export function TodoDetail({
   todo,
   now,
@@ -429,7 +509,7 @@ export function TodoDetail({
   onDirty: (dirty: boolean) => void;
 }) {
   const [text, setText] = useState("");
-  const [sentId, setSentId] = useState<string | null>(null);
+  const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
   const thread = useRef<HTMLOListElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const scrollAfterSend = useRef(true);
@@ -464,7 +544,7 @@ export function TodoDetail({
       )
     ) {
       scrollAfterSend.current = true;
-      setSentId(note.id);
+      setSentIds((ids) => new Set(ids).add(note.id));
       setText("");
       composer.current?.focus({ preventScroll: true });
     }
@@ -538,24 +618,11 @@ export function TodoDetail({
             tabIndex={todo.notes.length ? 0 : undefined}
           >
             {todo.notes.map((note) => (
-              <li
+              <ChatMessage
                 key={note.id}
-                className={
-                  "chat-message " +
-                  (note.id === sentId ? "chat-message-new" : "")
-                }
-              >
-                <span className="avatar" aria-hidden="true">
-                  <UserRound size={21} strokeWidth={1.7} />
-                </span>
-                <div className="message-content">
-                  <span className="message-name">{messages.chat.self}</span>
-                  <time className="message-time" dateTime={note.createdAt}>
-                    {clockText(new Date(note.createdAt))}
-                  </time>
-                  <p className="message-text">{note.text}</p>
-                </div>
-              </li>
+                note={note}
+                enter={sentIds.has(note.id)}
+              />
             ))}
           </ol>
           <form className="chat-composer" onSubmit={post}>
