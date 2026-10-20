@@ -234,6 +234,9 @@ export const messages = {
     },
   },
   errors: {
+    api: {
+      general: "通信エラーが発生しました。再試行してください。",
+    },
     invalidState: "共有データを読み込めませんでした",
     invalidBackup: "対応するバックアップ形式ではありません。",
     invalidTodo: "TODOのデータが正しくありません。",
