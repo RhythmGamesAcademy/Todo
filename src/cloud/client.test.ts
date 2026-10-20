@@ -35,7 +35,14 @@ const validState = (): CloudState => ({
       assigneeId: "user-1",
       createdAt: NOW,
       updatedAt: NOW,
-      notes: [{ id: "note-1", text: "たたき台を共有", createdAt: NOW }],
+      notes: [
+        {
+          id: "note-1",
+          text: "たたき台を共有",
+          createdAt: NOW,
+          userId: "user-1",
+        },
+      ],
     },
   ],
   activities: [

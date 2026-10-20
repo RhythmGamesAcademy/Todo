@@ -115,6 +115,7 @@ vi.mock("../cloud/useBoard", async () => {
                         id: crypto.randomUUID(),
                         text: body,
                         createdAt: timestamp,
+                        userId: "me",
                       },
                     ],
                     updatedAt: timestamp,
@@ -157,7 +158,12 @@ const task: Todo = {
   createdAt: "2026-10-19T00:00:00Z",
   updatedAt: "2026-10-19T00:00:00Z",
   notes: [
-    { id: "progress", text: "メモも残す", createdAt: "2026-10-19T00:00:00Z" },
+    {
+      id: "progress",
+      text: "メモも残す",
+      createdAt: "2026-10-19T00:00:00Z",
+      userId: "me",
+    },
   ],
 };
 const doneMenu = () =>

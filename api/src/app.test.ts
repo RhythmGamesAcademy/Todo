@@ -241,6 +241,7 @@ describeDb("共有リストAPI", () => {
     expect(todo.notes[0]).toMatchObject({
       id: memo.id,
       text: "牛乳は低脂肪",
+      userId: creatorId,
     });
     const titleBeforeDelete = todo.title;
 
@@ -472,7 +473,7 @@ describeDb("共有リストAPI", () => {
     ).toBeUndefined();
     expect(
       state.todos.find((item: { id: string }) => item.id === todo.id),
-    ).toMatchObject({ assigneeId: null });
+    ).toMatchObject({ assigneeId: null, notes: [{ userId: null }] });
     expect(
       state.activities.find(
         (item: { kind: string; before: string | null }) =>

@@ -487,6 +487,7 @@ export function TodoDetail({
   todo,
   now,
   users,
+  meId,
   activities,
   onUpdate,
   onMemo,
@@ -497,6 +498,7 @@ export function TodoDetail({
   todo: Todo;
   now: Date;
   users: CloudUser[];
+  meId: string | null;
   activities: Activity[];
   onUpdate: (patch: TodoPatch, message: string) => Promise<boolean>;
   onMemo: (body: string) => Promise<boolean>;
@@ -617,6 +619,7 @@ export function TodoDetail({
             activities={activities}
             memos={todo.notes}
             users={users}
+            meId={meId}
             revealingIds={sentIds}
           />
           <form className="chat-composer" onSubmit={post}>

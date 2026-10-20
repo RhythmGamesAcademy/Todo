@@ -11,6 +11,8 @@ export interface TimelineProps {
   memos: Note[];
   /** userId → 名前の解決に使う */
   users: CloudUser[];
+  /** 自分の userId。自分のメモだけ「自分」と表示する */
+  meId: string | null;
   /** 送信直後のメモだけ点から本文へ演出する */
   revealingIds?: ReadonlySet<string>;
 }
@@ -66,7 +68,15 @@ export function computeEntries(
   });
 }
 
-function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
+function ChatMessage({
+  note,
+  enter,
+  author,
+}: {
+  note: Note;
+  enter: boolean;
+  author: string;
+}) {
   const [pending, setPending] = useState(enter);
   const row = useRef<HTMLLIElement>(null);
   const followReveal = useRef(false);
@@ -130,7 +140,7 @@ function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
         <UserRound size={21} strokeWidth={1.7} />
       </span>
       <div className="message-content">
-        <span className="message-name">{messages.chat.self}</span>
+        <span className="message-name">{author}</span>
         <time className="message-time" dateTime={note.createdAt}>
           {dateText(note.createdAt)}
         </time>
@@ -164,9 +174,20 @@ export function Timeline({
   activities,
   memos,
   users,
+  meId,
   revealingIds,
 }: TimelineProps) {
   const thread = useRef<HTMLOListElement>(null);
+  const names = useMemo(
+    () => new Map(users.map((user) => [user.id, user.name])),
+    [users],
+  );
+  const authorName = (note: Note): string => {
+    if (note.userId !== null && note.userId === meId) return messages.chat.self;
+    if (note.userId !== null)
+      return names.get(note.userId) ?? messages.activity.memoFallback;
+    return messages.activity.memoFallback;
+  };
   const entries = useMemo(
     () => computeEntries(activities, memos, users),
     [activities, memos, users],
@@ -197,6 +218,7 @@ export function Timeline({
           <ChatMessage
             key={"memo-" + entry.id}
             note={entry.note}
+            author={authorName(entry.note)}
             enter={!!revealingIds?.has(entry.id)}
           />
         ) : (

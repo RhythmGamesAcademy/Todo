@@ -11,10 +11,16 @@ const users: CloudUser[] = [
   { id: "u2", name: "佐藤", createdAt: "2026-01-01T00:00:00.000Z" },
 ];
 
-const memo = (id: string, text: string, createdAt: string): Note => ({
+const memo = (
+  id: string,
+  text: string,
+  createdAt: string,
+  userId: string | null = "u1",
+): Note => ({
   id,
   text,
   createdAt,
+  userId,
 });
 
 const activity = (extra: Partial<Activity>): Activity => ({
@@ -31,7 +37,12 @@ const activity = (extra: Partial<Activity>): Activity => ({
 
 function renderTimeline(activities: Activity[], memos: Note[] = []) {
   return render(
-    <Timeline activities={activities} memos={memos} users={users} />,
+    <Timeline
+      activities={activities}
+      memos={memos}
+      users={users}
+      meId="u1"
+    />,
   );
 }
 
@@ -73,6 +84,24 @@ describe("タイムライン", () => {
       .map((item) => item.querySelector("time")?.getAttribute("dateTime"));
     expect(times[0]).toBe("2026-10-01T01:00:00.000Z");
     expect(times[2]).toBe("2026-10-01T02:00:00.000Z");
+  });
+
+  it("メモの投稿者名を表示し、自分・削除済み・不明を区別する", () => {
+    renderTimeline(
+      [],
+      [
+        memo("m1", "自分のメモ", "2026-10-01T01:00:00.000Z", "u1"),
+        memo("m2", "佐藤のメモ", "2026-10-01T02:00:00.000Z", "u2"),
+        memo("m3", "削除済みのメモ", "2026-10-01T03:00:00.000Z", "gone"),
+        memo("m4", "投稿者不明のメモ", "2026-10-01T04:00:00.000Z", null),
+      ],
+    );
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(4);
+    expect(items[0].textContent).toContain(messages.chat.self);
+    expect(items[1].textContent).toContain("佐藤");
+    expect(items[2].textContent).toContain(messages.activity.memoFallback);
+    expect(items[3].textContent).toContain(messages.activity.memoFallback);
   });
 
   it("状態と優先度の変更を日本語ラベルで表示する", () => {

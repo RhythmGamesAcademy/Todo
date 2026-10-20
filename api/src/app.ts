@@ -59,6 +59,7 @@ interface UserRefRow {
 interface MemoRow {
   id: string;
   todo_id: string;
+  user_id: string | null;
   body: string;
   created_at: unknown;
 }
@@ -591,7 +592,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
       await Promise.all([
         sql`SELECT id, name, created_at FROM users WHERE list_id = ${list.id} ORDER BY created_at, id`,
         sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
-        sql`SELECT m.id, m.todo_id, m.body, m.created_at FROM memos m JOIN todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
+        sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM memos m JOIN todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
         sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM activities WHERE list_id = ${list.id} ORDER BY created_at, id`,
       ]);
 
@@ -601,6 +602,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
         id: memo.id,
         text: memo.body,
         createdAt: toIso(memo.created_at),
+        userId: memo.user_id,
       };
       const notes = notesByTodo.get(memo.todo_id);
       if (notes) notes.push(note);

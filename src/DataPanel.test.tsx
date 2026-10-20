@@ -28,6 +28,7 @@ const state: CloudState = {
           id: "note-1",
           text: "メモ",
           createdAt: "2026-10-19T01:00:00.000Z",
+          userId: "user-1",
         },
       ],
     },

@@ -9,6 +9,7 @@ export interface Note {
   text: string;
   createdAt: string;
   editedAt?: string;
+  userId: string | null;
 }
 export interface Todo {
   id: string;

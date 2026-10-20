@@ -23,8 +23,19 @@ const validState = (): CloudState => ({
       createdAt: now,
       updatedAt: now,
       notes: [
-        { id: "note-1", text: "たたき台を共有", createdAt: now },
-        { id: "note-2", text: "修正済み", createdAt: now, editedAt: now },
+        {
+          id: "note-1",
+          text: "たたき台を共有",
+          createdAt: now,
+          userId: "user-1",
+        },
+        {
+          id: "note-2",
+          text: "修正済み",
+          createdAt: now,
+          editedAt: now,
+          userId: null,
+        },
       ],
     },
     {
@@ -178,6 +189,14 @@ describe("parseCloudState", () => {
     reject(broken((s) => (s.todos[0].notes[0].text = "")));
     reject(broken((s) => (s.todos[0].notes[0].text = "あ".repeat(2001))));
     reject(broken((s) => delete s.todos[0].notes[0].id));
+  });
+
+  it("メモの userId は文字列または null だけを受け付ける", () => {
+    reject(broken((s) => delete s.todos[0].notes[0].userId));
+    reject(broken((s) => (s.todos[0].notes[0].userId = "")));
+    reject(broken((s) => (s.todos[0].notes[0].userId = " ")));
+    reject(broken((s) => (s.todos[0].notes[0].userId = 1)));
+    reject(broken((s) => (s.todos[0].notes[0].userId = undefined)));
   });
 
   it("一覧とユーザーの必須項目を検証する", () => {

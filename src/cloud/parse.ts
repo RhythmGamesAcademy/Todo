@@ -87,7 +87,11 @@ function validateNote(value: unknown, ids: Set<string>): void {
     ids.has(value.id) ||
     !validText(value.text, 2000) ||
     !isIsoTimestamp(value.createdAt) ||
-    !(value.editedAt === undefined || isIsoTimestamp(value.editedAt))
+    !(value.editedAt === undefined || isIsoTimestamp(value.editedAt)) ||
+    !(
+      value.userId === null ||
+      (typeof value.userId === "string" && !!value.userId.trim())
+    )
   )
     return fail();
   ids.add(value.id);

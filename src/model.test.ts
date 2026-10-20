@@ -83,7 +83,12 @@ describe("TODOの表示と保存", () => {
     const task = make("report", null);
     task.status = "done";
     task.notes = [
-      { id: "note", text: "資料を調査した", createdAt: now.toISOString() },
+      {
+        id: "note",
+        text: "資料を調査した",
+        createdAt: now.toISOString(),
+        userId: null,
+      },
     ];
     expect(selectTodos([task], "done", "調査", "deadline", now, "any")).toEqual(
       [task],
