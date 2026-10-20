@@ -190,4 +190,21 @@ describe("管理画面", () => {
     );
     expect(props.onSessionLost).toHaveBeenCalledTimes(1);
   });
+
+  it("自分の削除に失敗したときは session を失効させない", async () => {
+    const user = userEvent.setup();
+    const props = setup({
+      ask: vi.fn(async () => true),
+      onRemoveMember: vi.fn(async () => false),
+    });
+    await user.click(
+      within(memberRow("自分")).getByRole("button", {
+        name: messages.manage.removeMember,
+      }),
+    );
+    await waitFor(() =>
+      expect(props.onRemoveMember).toHaveBeenCalledWith("me"),
+    );
+    expect(props.onSessionLost).not.toHaveBeenCalled();
+  });
 });
