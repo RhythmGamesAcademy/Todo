@@ -708,6 +708,100 @@ describe("利用者の操作", () => {
   });
 });
 
+describe("編集の保存経路", () => {
+  async function openEdit(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    await user.click(screen.getByRole("button", { name: messages.todo.edit }));
+    await waitFor(() =>
+      expect(screen.getByLabelText(/^タイトル/)).toBeTruthy(),
+    );
+    return screen.getByRole("dialog");
+  }
+
+  it("変更した項目だけを updateTodo に渡し、保存後は詳細へ戻って通知する", async () => {
+    ready([task()]);
+    const user = userEvent.setup();
+    render(<App />);
+    const dialog = await openEdit(user);
+    const title = within(dialog).getByLabelText(/^タイトル/);
+    await user.clear(title);
+    await user.type(title, "授業の課題（改）");
+    const description = within(dialog).getByLabelText(/^説明/);
+    await user.clear(description);
+    await user.type(description, "クラウド同期を確認する");
+    await user.click(
+      within(dialog).getByRole("button", { name: messages.todo.save }),
+    );
+    await waitFor(() => expect(board.updateTodo).toHaveBeenCalledTimes(1));
+    expect(board.updateTodo).toHaveBeenCalledWith("task", {
+      title: "授業の課題（改）",
+      description: "クラウド同期を確認する",
+    });
+    expect(board.setAssignee).not.toHaveBeenCalled();
+    const detail = screen.getByRole("dialog");
+    expect(
+      within(detail).getByRole("heading", { name: "授業の課題（改）" }),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText(/^タイトル/)).toBeNull();
+    expect(within(detail).getByText(messages.todo.saved)).toBeTruthy();
+  });
+
+  it("担当者だけを変えたときは setAssignee を呼び、updateTodo は呼ばない", async () => {
+    ready([task()]);
+    const user = userEvent.setup();
+    render(<App />);
+    const dialog = await openEdit(user);
+    await user.selectOptions(
+      within(dialog).getByLabelText(messages.todo.assignee),
+      "other",
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: messages.todo.save }),
+    );
+    await waitFor(() =>
+      expect(board.setAssignee).toHaveBeenCalledWith("task", "other"),
+    );
+    expect(board.setAssignee).toHaveBeenCalledTimes(1);
+    expect(board.updateTodo).not.toHaveBeenCalled();
+    const detail = screen.getByRole("dialog");
+    expect(
+      within(detail).getByRole("heading", { name: "授業の課題" }),
+    ).toBeTruthy();
+    expect(within(detail).getByText(messages.todo.saved)).toBeTruthy();
+  });
+
+  it("保存に失敗したら入力を残してエラーを表示し、詳細へ戻らない", async () => {
+    ready([task()], {
+      updateTodo: vi.fn().mockRejectedValue(new Error("offline")),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const dialog = await openEdit(user);
+    const title = within(dialog).getByLabelText(/^タイトル/);
+    await user.clear(title);
+    await user.type(title, "保存できない題名");
+    await user.click(
+      within(dialog).getByRole("button", { name: messages.todo.save }),
+    );
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("dialog")).getByRole("alert").textContent,
+      ).toContain(messages.errors.api.general),
+    );
+    expect(board.updateTodo).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText(/^タイトル/)).toHaveProperty(
+      "value",
+      "保存できない題名",
+    );
+    expect(
+      screen.getByRole("heading", { name: messages.todo.edit }),
+    ).toBeTruthy();
+    expect(screen.queryByText(messages.todo.saved)).toBeNull();
+  });
+});
+
 describe("接続状態", () => {
   it("セッションがないときは参加画面へトークンを渡す", async () => {
     ctrl.boot = { token: "invite-token", session: null };
