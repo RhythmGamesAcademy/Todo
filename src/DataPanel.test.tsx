@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useEffect, useState } from "react";
 import {
   cleanup,
   fireEvent,
@@ -8,9 +9,11 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import App from "./App";
+import { DataPanel } from "./DataPanel";
+import { messages } from "./messages";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
+import type { AskOptions } from "./ui";
 const task = (id: string, extra: Partial<Todo> = {}): Todo => ({
   id,
   title: id,
@@ -31,6 +34,85 @@ const file = (todos: Todo[]) => {
   Object.defineProperty(file, "text", { value: async () => raw });
   return file;
 };
+const load = (): Todo[] => {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw ? parseTodos(raw) : [];
+};
+interface Pending {
+  options: AskOptions;
+  resolve: (answer: boolean) => void;
+}
+function Harness() {
+  const [todos, setTodos] = useState<Todo[]>(load);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const [open, setOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<Pending | null>(null);
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY || event.key === null) setTodos(load());
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
+  const ask = (options: AskOptions) =>
+    new Promise<boolean>((resolve) => setConfirmation({ options, resolve }));
+  const save = (next: Todo[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, serializeTodos(next));
+      setTodos(next);
+      setError("");
+      return true;
+    } catch {
+      setError(messages.errors.save);
+      return false;
+    }
+  };
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(true)}>
+        {messages.data.title}
+      </button>
+      {open && (
+        <div role="dialog" aria-label={messages.data.title}>
+          {error && <p role="alert">{error}</p>}
+          <DataPanel
+            todos={todos}
+            recovery={null}
+            save={save}
+            ask={ask}
+            notify={setToast}
+            onRestored={() => {}}
+          />
+        </div>
+      )}
+      {toast && <p role="status">{toast}</p>}
+      {confirmation && (
+        <div role="alertdialog">
+          <p>{confirmation.options.description}</p>
+          <button
+            type="button"
+            onClick={() => {
+              confirmation.resolve(false);
+              setConfirmation(null);
+            }}
+          >
+            {confirmation.options.cancel ?? messages.common.cancel}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              confirmation.resolve(true);
+              setConfirmation(null);
+            }}
+          >
+            {confirmation.options.confirm}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 beforeEach(() => {
   localStorage.clear();
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
@@ -64,7 +146,7 @@ describe("復元と一括削除の操作", () => {
     const existing = [task("local")];
     localStorage.setItem(STORAGE_KEY, serializeTodos(existing));
     const user = userEvent.setup();
-    render(<App />);
+    render(<Harness />);
     await openData(user);
     await upload(user, [task("local", { title: "変更されない" }), task("new")]);
     expect(saved()).toEqual(existing);
@@ -103,7 +185,7 @@ describe("復元と一括削除の操作", () => {
       ]),
     );
     const user = userEvent.setup();
-    render(<App />);
+    render(<Harness />);
     await openData(user);
     await user.click(screen.getByRole("radio", { name: /更新＋新規追加/ }));
     await upload(user, [
@@ -131,7 +213,7 @@ describe("復元と一括削除の操作", () => {
   it("完全上書きは現在だけのTODOとメモを置き換える", async () => {
     localStorage.setItem(STORAGE_KEY, serializeTodos([task("old")]));
     const user = userEvent.setup();
-    render(<App />);
+    render(<Harness />);
     await openData(user);
     await user.click(screen.getByRole("radio", { name: /完全上書き/ }));
     await upload(user, [task("replacement")]);
@@ -156,7 +238,7 @@ describe("復元と一括削除の操作", () => {
     ];
     localStorage.setItem(STORAGE_KEY, serializeTodos(existing));
     const user = userEvent.setup();
-    render(<App />);
+    render(<Harness />);
     await openData(user);
     await user.click(screen.getByRole("button", { name: "まとめて削除" }));
     expect(screen.getByRole("alertdialog").textContent).toContain(
@@ -208,7 +290,7 @@ describe("復元と一括削除の操作", () => {
     const existing = [task("local")];
     localStorage.setItem(STORAGE_KEY, serializeTodos(existing));
     const user = userEvent.setup();
-    render(<App />);
+    render(<Harness />);
     await openData(user);
     const broken = new File(["broken"], "bad.json", {
       type: "application/json",
@@ -222,7 +304,7 @@ describe("復元と一括削除の操作", () => {
   it("確認中に別タブで更新された場合は古い復元内容を書き込まない", async () => {
     localStorage.setItem(STORAGE_KEY, serializeTodos([task("local")]));
     const user = userEvent.setup();
-    render(<App />);
+    render(<Harness />);
     await openData(user);
     await upload(user, [task("new")]);
     await user.click(screen.getByRole("button", { name: "復元する" }));

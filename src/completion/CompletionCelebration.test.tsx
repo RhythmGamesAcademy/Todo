@@ -13,6 +13,124 @@ import { messages } from "../messages";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "../model";
 import type { Todo } from "../model";
 
+const remote = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    version: 0,
+    listeners,
+    notify() {
+      this.version += 1;
+      listeners.forEach((listener) => listener());
+    },
+  };
+});
+
+vi.mock("../cloud/useBoard", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const { parseTodos, serializeTodos, STORAGE_KEY } = await import("../model");
+  const removed = new Map<string, Todo>();
+  const now = () => new Date().toISOString();
+  const read = (): Todo[] => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? parseTodos(raw) : [];
+  };
+  const write = (todos: Todo[]) => {
+    localStorage.setItem(STORAGE_KEY, serializeTodos(todos));
+    remote.notify();
+  };
+  return {
+    useBoard: () => {
+      useSyncExternalStore(
+        (listener: () => void) => {
+          remote.listeners.add(listener);
+          return () => remote.listeners.delete(listener);
+        },
+        () => remote.version,
+      );
+      const todos = read();
+      return {
+        phase: "ready",
+        state: {
+          list: { id: "list", title: "共有リスト", revision: 1 },
+          users: [
+            {
+              id: "me",
+              name: "自分",
+              createdAt: "2026-10-19T00:00:00Z",
+            },
+          ],
+          todos,
+          activities: [],
+        },
+        me: { token: "token", userId: "me", name: "自分" },
+        refresh: () => {},
+        addTodo: async (draft: Todo) => {
+          const timestamp = now();
+          write([
+            ...todos,
+            {
+              ...draft,
+              id: crypto.randomUUID(),
+              notes: [],
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ]);
+        },
+        updateTodo: async (id: string, patch: Partial<Todo>) => {
+          write(
+            todos.map((todo) =>
+              todo.id === id ? { ...todo, ...patch, updatedAt: now() } : todo,
+            ),
+          );
+        },
+        removeTodo: async (id: string) => {
+          const found = todos.find((todo) => todo.id === id);
+          if (found) removed.set(id, found);
+          write(todos.filter((todo) => todo.id !== id));
+        },
+        undoRemove: async (id: string) => {
+          const found = removed.get(id);
+          if (found && !read().some((todo) => todo.id === id))
+            write([...read(), found]);
+        },
+        addMemo: async (todoId: string, body: string) => {
+          const timestamp = now();
+          write(
+            todos.map((todo) =>
+              todo.id === todoId
+                ? {
+                    ...todo,
+                    notes: [
+                      ...todo.notes,
+                      {
+                        id: crypto.randomUUID(),
+                        text: body,
+                        createdAt: timestamp,
+                      },
+                    ],
+                    updatedAt: timestamp,
+                  }
+                : todo,
+            ),
+          );
+        },
+        setAssignee: async (id: string, assigneeId: string | null) => {
+          write(
+            todos.map((todo) =>
+              todo.id === id ? { ...todo, assigneeId, updatedAt: now() } : todo,
+            ),
+          );
+        },
+        renameBoard: async () => {},
+        removeBoard: async () => {},
+        renameMember: async () => {},
+        removeMember: async () => {},
+      };
+    },
+  };
+});
+
 interface Play {
   frames: Keyframe[];
   finish: () => void;

@@ -1,9 +1,8 @@
 import { messages } from "./messages";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowDownUp,
-  ArrowRight,
   Check,
   ChevronRight,
   HardDrive,
@@ -12,6 +11,7 @@ import {
   LockKeyhole,
   Plus,
   Search,
+  UserRound,
   X,
 } from "lucide-react";
 import {
@@ -21,11 +21,23 @@ import {
   nextDeadlineId,
   selectTodos,
 } from "./model";
-import type { Filter, Sort, Todo, TodoDraft } from "./model";
-import { useTodoLayout, useTodoStore } from "./storage";
+import type {
+  AssigneeFilter,
+  Filter,
+  Sort,
+  Status,
+  Todo,
+  TodoDraft,
+} from "./model";
+import type { TodoPatch } from "./cloud/types";
+import { useBoard } from "./cloud/useBoard";
+import { resolveSession, writeSession } from "./cloud/session";
+import type { Session } from "./cloud/session";
+import { useTodoLayout } from "./storage";
 import { DataPanel } from "./DataPanel";
 import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
+import { LoginScreen } from "./screens/LoginScreen";
 import { TodoNavigation } from "./components/TodoNavigation";
 import { CompletionCelebration } from "./completion/CompletionCelebration";
 import { useCompletionQueue } from "./completion/useCompletionQueue";
@@ -36,19 +48,53 @@ type View =
   | { type: "data" }
   | null;
 type Confirm = AskOptions & { resolve: (answer: boolean) => void };
+type Undo = { id: string };
 export default function App() {
-  const store = useTodoStore();
-  const { todos } = store;
+  // resolveSession() はハッシュのトークンを URL から消すため、初回だけ実行する。
+  const bootRef = useRef<ReturnType<typeof resolveSession> | null>(null);
+  if (bootRef.current === null) bootRef.current = resolveSession();
+  const boot = bootRef.current;
+  const [currentSession, setCurrentSession] = useState<Session | null>(
+    boot.session,
+  );
+  const [prefillToken, setPrefillToken] = useState<string | null>(boot.token);
+  const onSessionLost = useCallback(() => {
+    // 404 が重なって複数回呼ばれても同じ状態に収束させる。
+    writeSession(null);
+    setCurrentSession(null);
+    setPrefillToken(null);
+  }, []);
+  const board = useBoard(currentSession, onSessionLost);
+  const state = board.phase === "ready" ? board.state : null;
+  const todos = state ? state.todos : [];
+  const users = state ? state.users : [];
   const [layout, changeLayout] = useTodoLayout();
   const [now, setNow] = useState(() => new Date());
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = useState<Sort>("deadline");
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("any");
   const [search, setSearch] = useState("");
   const [view, setView] = useState<View>(null);
   const [dirty, setDirty] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirm | null>(null);
-  const [toast, setToast] = useState<{ message: string; undo?: Todo } | null>(
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingCompletion, setPendingCompletion] = useState<{
+    id: string;
+    status: Status;
+  } | null>(null);
+  const [toast, setToast] = useState<{ message: string; undo?: Undo } | null>(
     null,
+  );
+  const completionTodos = useMemo(
+    () =>
+      pendingCompletion
+        ? todos.map((todo) =>
+            todo.id === pendingCompletion.id
+              ? { ...todo, status: pendingCompletion.status }
+              : todo,
+          )
+        : todos,
+    [todos, pendingCompletion],
   );
   const prepareCompletion = useCallback(() => {
     setFilter("active");
@@ -56,7 +102,7 @@ export default function App() {
     setToast(null);
   }, []);
   const completion = useCompletionQueue(
-    todos,
+    completionTodos,
     !!view || !!confirmation,
     prepareCompletion,
   );
@@ -95,8 +141,8 @@ export default function App() {
     done: todos.filter((t) => t.status === "done").length,
   };
   const visible = useMemo(
-    () => selectTodos(todos, filter, search, sort, now, "any"),
-    [todos, filter, search, sort, now],
+    () => selectTodos(todos, filter, search, sort, now, assigneeFilter),
+    [todos, filter, search, sort, now, assigneeFilter],
   );
   const selected =
     view && (view.type === "detail" || view.type === "edit")
@@ -104,11 +150,22 @@ export default function App() {
       : undefined;
   const nextDueId = useMemo(() => nextDeadlineId(todos, now), [todos, now]);
   useEffect(() => {
+    if (board.phase !== "ready") return;
     if (view && (view.type === "detail" || view.type === "edit") && !selected) {
       setView(null);
       setDirty(false);
     }
-  }, [view, selected]);
+  }, [board.phase, view, selected]);
+  async function act(call: () => Promise<unknown>) {
+    setActionError(null);
+    try {
+      await call();
+      return true;
+    } catch {
+      setActionError(messages.errors.api.general);
+      return false;
+    }
+  }
   async function allowDiscard(action: string = messages.discard.close) {
     if (!dirty) return true;
     return ask({
@@ -130,45 +187,68 @@ export default function App() {
     setDirty(false);
     setView({ type: "create" });
   }
-  function update(todo: Todo, message: string) {
-    if (!store.save(todos.map((t) => (t.id === todo.id ? todo : t))))
+  async function updateTodo(id: string, patch: TodoPatch, message: string) {
+    const previous = todos.find((t) => t.id === id);
+    const completing =
+      !!previous && previous.status !== "done" && patch.status === "done";
+    // 再取得で先に done になっても、演出の順番待ちに並ぶまでは件数を増やさない。
+    if (previous && completing)
+      setPendingCompletion({ id, status: previous.status });
+    if (!(await act(() => board.updateTodo(id, patch)))) {
+      if (completing) setPendingCompletion(null);
       return false;
-    const previous = todos.find((t) => t.id === todo.id);
-    if (previous && previous.status !== "done" && todo.status === "done")
-      completion.enqueue(todo);
+    }
     setToast({ message });
+    if (previous && completing) {
+      completion.enqueue({ ...previous, ...patch, status: "done" });
+      setPendingCompletion(null);
+    }
     return true;
   }
-  function saveDraft(draft: TodoDraft) {
-    const timestamp = new Date().toISOString();
+  async function addMemo(todoId: string, body: string) {
+    if (!(await act(() => board.addMemo(todoId, body)))) return false;
+    setToast({ message: messages.chat.sent });
+    return true;
+  }
+  async function saveDraft(draft: TodoDraft) {
     if (view?.type === "create") {
-      const todo: Todo = {
-        ...draft,
-        id: crypto.randomUUID(),
-        notes: [],
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
-      if (!store.save([...todos, todo])) return false;
+      if (!(await act(() => board.addTodo(draft)))) return false;
       setSearch("");
       setFilter("all");
       setDirty(false);
-      setView({ type: "detail", id: todo.id });
+      // 作成直後の詳細表示に必要な ID は API 応答に含まれないため一覧へ戻る。
+      setView(null);
       setToast({ message: messages.todo.created });
       return true;
     }
-    if (
-      selected &&
-      update(
-        { ...selected, ...draft, updatedAt: timestamp },
-        messages.todo.saved,
+    if (!selected) return false;
+    const patch: TodoPatch = {};
+    if (draft.title !== selected.title) patch.title = draft.title;
+    if (draft.description !== selected.description)
+      patch.description = draft.description;
+    if (draft.deadline !== selected.deadline) patch.deadline = draft.deadline;
+    if (draft.priority !== selected.priority) patch.priority = draft.priority;
+    if (draft.status !== selected.status) patch.status = draft.status;
+    if (draft.assigneeId !== selected.assigneeId)
+      patch.assigneeId = draft.assigneeId;
+    const fields = Object.keys(patch);
+    if (fields.length === 0) {
+      setActionError(null);
+      setToast({ message: messages.todo.saved });
+    } else if (fields.length === 1 && fields[0] === "assigneeId") {
+      if (
+        !(await act(() =>
+          board.setAssignee(selected.id, patch.assigneeId ?? null),
+        ))
       )
-    ) {
-      setDirty(false);
-      setView({ type: "detail", id: selected.id });
-      return true;
+        return false;
+      setToast({ message: messages.todo.saved });
+    } else if (!(await updateTodo(selected.id, patch, messages.todo.saved))) {
+      return false;
     }
-    return false;
+    setDirty(false);
+    setView({ type: "detail", id: selected.id });
+    return true;
   }
   async function deleteTodo(todo: Todo) {
     if (
@@ -182,12 +262,48 @@ export default function App() {
         danger: true,
       })
     ) {
-      if (store.save(todos.filter((t) => t.id !== todo.id))) {
+      if (await act(() => board.removeTodo(todo.id))) {
         setView(null);
         setDirty(false);
-        setToast({ message: messages.todo.deleted, undo: todo });
+        setToast({
+          message: messages.todo.deleted,
+          undo: { id: todo.id },
+        });
       }
     }
+  }
+  if (board.phase === "login") {
+    return (
+      <div className="app-shell login-shell">
+        <LoginScreen
+          prefillToken={prefillToken}
+          onJoined={(session) => {
+            writeSession(session);
+            setCurrentSession(session);
+            setPrefillToken(null);
+          }}
+        />
+      </div>
+    );
+  }
+  if (board.phase === "loading") {
+    return (
+      <div className="app-shell board-status" role="status">
+        <Mark />
+        <p>{messages.board.loading}</p>
+      </div>
+    );
+  }
+  if (board.phase === "error") {
+    return (
+      <div className="app-shell board-status" role="alert">
+        <AlertCircle size={23} />
+        <p>{board.message}</p>
+        <button className="button button-primary" onClick={board.refresh}>
+          {messages.common.retry}
+        </button>
+      </div>
+    );
   }
   return (
     <div className="app-shell">
@@ -259,20 +375,11 @@ export default function App() {
       </aside>
       <div className="workspace">
         <main id="main" className="main-content" tabIndex={-1}>
-          {store.error && (
+          {actionError && (
             <div className="storage-error" role="alert">
               <AlertCircle size={19} />
               <div>
-                <p>{store.error}</p>
-                {store.recovery && (
-                  <button
-                    className="text-button"
-                    onClick={() => setView({ type: "data" })}
-                  >
-                    {messages.data.open}
-                    <ArrowRight size={14} />
-                  </button>
-                )}
+                <p>{actionError}</p>
               </div>
             </div>
           )}
@@ -284,7 +391,6 @@ export default function App() {
             <button
               className="button button-primary create-button"
               onClick={openCreate}
-              disabled={!!store.recovery}
             >
               <Plus size={19} />
               {messages.todo.create}
@@ -315,6 +421,31 @@ export default function App() {
                 )}
               </div>
               <div className="list-controls">
+                <div className="sort-wrap assignee-filter">
+                  <UserRound size={16} />
+                  <label htmlFor="todo-assignee-filter">
+                    {messages.search.assignee}
+                  </label>
+                  <select
+                    id="todo-assignee-filter"
+                    value={assigneeFilter}
+                    onChange={(e) =>
+                      setAssigneeFilter(e.target.value as AssigneeFilter)
+                    }
+                  >
+                    <option value="any">
+                      {messages.filters.assignment.any}
+                    </option>
+                    <option value="none">
+                      {messages.filters.assignment.none}
+                    </option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="sort-wrap">
                   <ArrowDownUp size={17} />
                   <label htmlFor="todo-sort">{messages.search.sort}</label>
@@ -362,6 +493,7 @@ export default function App() {
                     key={todo.id}
                     todo={todo}
                     now={now}
+                    users={users}
                     compact={layout === "compact"}
                     nextDue={todo.id === nextDueId}
                     onOpen={() => {
@@ -381,7 +513,6 @@ export default function App() {
                   <button
                     className="button button-primary"
                     onClick={openCreate}
-                    disabled={!!store.recovery}
                   >
                     <Plus size={18} />
                     {messages.todo.createAction}
@@ -408,12 +539,13 @@ export default function App() {
           onClose={closeView}
           notice={toast?.message}
         >
-          {store.error && (
+          {actionError && (
             <p className="modal-error" role="alert">
-              {store.error}
+              {actionError}
             </p>
           )}
           <TodoForm
+            users={users}
             onSave={saveDraft}
             onCancel={closeView}
             onDirty={setDirty}
@@ -427,14 +559,15 @@ export default function App() {
           onClose={closeView}
           notice={toast?.message}
         >
-          {store.error && (
+          {actionError && (
             <p className="modal-error" role="alert">
-              {store.error}
+              {actionError}
             </p>
           )}
           <TodoForm
             key={selected.id}
             todo={selected}
+            users={users}
             setDeadline={view.setDeadline}
             onSave={saveDraft}
             onCancel={async () => {
@@ -455,16 +588,20 @@ export default function App() {
           wide
           notice={toast?.message}
         >
-          {store.error && (
+          {actionError && (
             <p className="modal-error" role="alert">
-              {store.error}
+              {actionError}
             </p>
           )}
           <TodoDetail
             key={selected.id}
             todo={selected}
             now={now}
-            onUpdate={update}
+            users={users}
+            onUpdate={(patch, message) =>
+              updateTodo(selected.id, patch, message)
+            }
+            onMemo={(body) => addMemo(selected.id, body)}
             onDirty={setDirty}
             onEdit={async (setDeadline = false) => {
               if (await allowDiscard(messages.discard.edit)) {
@@ -483,9 +620,9 @@ export default function App() {
           notice={toast?.message}
         >
           <div className="data-content">
-            {store.error && (
+            {actionError && (
               <p className="modal-error" role="alert">
-                {store.error}
+                {actionError}
               </p>
             )}
             <div className="data-notice">
@@ -497,8 +634,8 @@ export default function App() {
             </div>
             <DataPanel
               todos={todos}
-              recovery={store.recovery}
-              save={store.save}
+              recovery={null}
+              save={() => false}
               ask={ask}
               notify={(message) => setToast({ message })}
               onRestored={() => {
@@ -506,32 +643,6 @@ export default function App() {
                 setFilter("all");
               }}
             />
-            {store.recovery && (
-              <div className="recovery-section">
-                <h3>{messages.data.recovery.title}</h3>
-                <p>{messages.data.recovery.description}</p>
-                <button
-                  className="button button-danger"
-                  onClick={async () => {
-                    if (
-                      await ask({
-                        title: messages.data.recovery.confirmTitle,
-                        description: messages.data.recovery.confirmDescription,
-                        confirm: messages.data.recovery.confirm,
-                        danger: true,
-                      })
-                    ) {
-                      if (store.save([], true)) {
-                        setView(null);
-                        setToast({ message: messages.data.recovery.done });
-                      }
-                    }
-                  }}
-                >
-                  {messages.data.recovery.action}
-                </button>
-              </div>
-            )}
           </div>
         </Modal>
       )}
@@ -604,12 +715,10 @@ export default function App() {
             {toast.undo && (
               <button
                 className="toast-undo"
-                onClick={() => {
-                  if (
-                    toast.undo &&
-                    !todos.some((t) => t.id === toast.undo!.id) &&
-                    store.save([...todos, toast.undo])
-                  )
+                onClick={async () => {
+                  const undo = toast.undo;
+                  if (!undo) return;
+                  if (await act(() => board.undoRemove(undo.id)))
                     setToast({ message: messages.todo.restored });
                 }}
               >

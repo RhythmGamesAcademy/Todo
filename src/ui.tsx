@@ -28,6 +28,7 @@ import {
   toDateInput,
 } from "./model";
 import type { Note, Priority, Status, Todo, TodoDraft } from "./model";
+import type { CloudUser, TodoPatch } from "./cloud/types";
 export function Mark() {
   return (
     <img
@@ -109,18 +110,26 @@ export function Modal({
 export function TodoCard({
   todo,
   now,
+  users,
   onOpen,
   nextDue = false,
   compact = false,
 }: {
   todo: Todo;
   now: Date;
+  users: CloudUser[];
   onOpen: () => void;
   nextDue?: boolean;
   compact?: boolean;
 }) {
   const overdue = isOverdue(todo, now);
   const latest = todo.notes.at(-1);
+  const assignee = todo.assigneeId
+    ? users.find((user) => user.id === todo.assigneeId)
+    : undefined;
+  const assigneeName = todo.assigneeId
+    ? (assignee?.name ?? messages.todo.assigneeUnknown)
+    : null;
   return (
     <button
       className={
@@ -146,9 +155,17 @@ export function TodoCard({
             {STATUS[todo.status]}
           </span>
         )}
-        <span className={"priority priority-" + todo.priority}>
-          <Flag size={13} />
-          {messages.todo.priorityLabel(PRIORITY[todo.priority])}
+        <span className="card-tags">
+          {assigneeName && (
+            <span className="assignee">
+              <UserRound size={13} />
+              {assigneeName}
+            </span>
+          )}
+          <span className={"priority priority-" + todo.priority}>
+            <Flag size={13} />
+            {messages.todo.priorityLabel(PRIORITY[todo.priority])}
+          </span>
         </span>
       </div>
       <div className="card-summary">
@@ -202,6 +219,7 @@ export function TodoCard({
 }
 export function TodoForm({
   todo,
+  users,
   setDeadline: focusDeadline = false,
   onSave,
   onCancel,
@@ -209,8 +227,9 @@ export function TodoForm({
   ask,
 }: {
   todo?: Todo;
+  users: CloudUser[];
   setDeadline?: boolean;
-  onSave: (draft: TodoDraft) => boolean;
+  onSave: (draft: TodoDraft) => Promise<boolean>;
   onCancel: () => void;
   onDirty: (dirty: boolean) => void;
   ask: (options: AskOptions) => Promise<boolean>;
@@ -227,14 +246,21 @@ export function TodoForm({
     todo?.priority ?? "medium",
   );
   const [status, setStatus] = useState<Status>(todo?.status ?? "todo");
+  const [assigneeId, setAssigneeId] = useState<string | null>(
+    todo?.assigneeId ?? null,
+  );
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const assigneeMissing =
+    assigneeId !== null && !users.some((user) => user.id === assigneeId);
   const dirty =
     title !== (todo?.title ?? "") ||
     description !== (todo?.description ?? "") ||
     noDeadline !== (todo ? todo.deadline === null : false) ||
     deadline !== (todo?.deadline ? toDateInput(todo.deadline) : "") ||
     priority !== (todo?.priority ?? "medium") ||
-    status !== (todo?.status ?? "todo");
+    status !== (todo?.status ?? "todo") ||
+    assigneeId !== (todo?.assigneeId ?? null);
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
@@ -275,14 +301,19 @@ export function TodoForm({
         return;
       }
     }
-    onSave({
-      title: title.trim(),
-      description: description.trim(),
-      deadline: deadlineIso,
-      priority,
-      status,
-      assigneeId: todo?.assigneeId ?? null,
-    });
+    setSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        description: description.trim(),
+        deadline: deadlineIso,
+        priority,
+        status,
+        assigneeId,
+      });
+    } finally {
+      setSaving(false);
+    }
   }
   return (
     <form onSubmit={submit} className="todo-form">
@@ -381,6 +412,25 @@ export function TodoForm({
           ))}
         </div>
       </fieldset>
+      <label className="field-label" htmlFor="todo-assignee">
+        {messages.todo.assignee}
+      </label>
+      <select
+        id="todo-assignee"
+        className="field"
+        value={assigneeId ?? ""}
+        onChange={(e) => setAssigneeId(e.target.value || null)}
+      >
+        <option value="">{messages.filters.assignment.none}</option>
+        {assigneeMissing && assigneeId && (
+          <option value={assigneeId}>{messages.todo.assigneeUnknown}</option>
+        )}
+        {users.map((user) => (
+          <option key={user.id} value={user.id}>
+            {user.name}
+          </option>
+        ))}
+      </select>
       {todo && (
         <>
           <label className="field-label" htmlFor="edit-status">
@@ -414,7 +464,11 @@ export function TodoForm({
         >
           {messages.common.cancel}
         </button>
-        <button type="submit" className="button button-primary">
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={saving}
+        >
           {todo ? <Check size={18} /> : <Plus size={18} />}{" "}
           {todo ? messages.todo.save : messages.todo.createAction}
         </button>
@@ -433,6 +487,10 @@ function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
   const [pending, setPending] = useState(enter);
   const row = useRef<HTMLLIElement>(null);
   const followReveal = useRef(false);
+  // 送信完了の応答でメモが届いてから印が付く場合も、点から本文へ演出する。
+  useEffect(() => {
+    if (enter) setPending(true);
+  }, [enter]);
   useEffect(() => {
     if (!pending) {
       if (followReveal.current) {
@@ -521,23 +579,35 @@ function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
 export function TodoDetail({
   todo,
   now,
+  users,
   onUpdate,
+  onMemo,
   onEdit,
   onDelete,
   onDirty,
 }: {
   todo: Todo;
   now: Date;
-  onUpdate: (todo: Todo, message: string) => boolean;
+  users: CloudUser[];
+  onUpdate: (patch: TodoPatch, message: string) => Promise<boolean>;
+  onMemo: (body: string) => Promise<boolean>;
   onEdit: (setDeadline?: boolean) => void;
   onDelete: () => void;
   onDirty: (dirty: boolean) => void;
 }) {
   const [text, setText] = useState("");
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
+  const [pendingReveals, setPendingReveals] = useState(0);
   const thread = useRef<HTMLOListElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const scrollAfterSend = useRef(true);
+  const previousNotes = useRef(todo.notes.length);
+  const assignee = todo.assigneeId
+    ? users.find((user) => user.id === todo.assigneeId)
+    : undefined;
+  const assigneeName = todo.assigneeId
+    ? (assignee?.name ?? messages.todo.assigneeUnknown)
+    : null;
   useEffect(() => {
     onDirty(!!text.trim());
   }, [text, onDirty]);
@@ -553,25 +623,33 @@ export function TodoDetail({
       scrollAfterSend.current = false;
     }
   }, [todo.notes]);
-  const url = calendarUrl(todo);
-  function post(e?: FormEvent) {
-    e?.preventDefault();
-    if (!text.trim()) return;
-    const note: Note = {
-      id: crypto.randomUUID(),
-      text: text.trim(),
-      createdAt: new Date().toISOString(),
-    };
-    if (
-      onUpdate(
-        { ...todo, notes: [...todo.notes, note], updatedAt: note.createdAt },
-        messages.chat.sent,
-      )
-    ) {
-      scrollAfterSend.current = true;
-      setSentIds((ids) => new Set(ids).add(note.id));
-      setText("");
+  useEffect(() => {
+    const added = todo.notes.length - previousNotes.current;
+    if (added > 0 && pendingReveals > 0) {
+      const newIds = todo.notes.slice(-added).map((note) => note.id);
+      const revealed = newIds.slice(0, pendingReveals);
+      setSentIds((ids) => {
+        const next = new Set(ids);
+        for (const id of revealed) next.add(id);
+        return next;
+      });
+      setPendingReveals((count) => Math.max(0, count - added));
     }
+    previousNotes.current = todo.notes.length;
+  }, [todo.notes, pendingReveals]);
+  const url = calendarUrl(todo);
+  async function post(e?: FormEvent) {
+    e?.preventDefault();
+    const body = text.trim();
+    if (!body) return;
+    // 応答の再取得でメモが届く前に印を付けておき、失敗時は取り消す。
+    setPendingReveals((count) => count + 1);
+    if (!(await onMemo(body))) {
+      setPendingReveals((count) => Math.max(0, count - 1));
+      return;
+    }
+    scrollAfterSend.current = true;
+    setText("");
   }
   return (
     <div className="detail-content">
@@ -581,6 +659,12 @@ export function TodoDetail({
             <Flag size={15} />
             {messages.todo.priorityLabel(PRIORITY[todo.priority])}
           </span>
+          {assigneeName && (
+            <span className="assignee">
+              <UserRound size={15} />
+              {assigneeName}
+            </span>
+          )}
           <span
             className={"detail-due " + (isOverdue(todo, now) ? "overdue" : "")}
           >
@@ -606,12 +690,8 @@ export function TodoDetail({
               className="field status-select"
               value={todo.status}
               onChange={(e) =>
-                onUpdate(
-                  {
-                    ...todo,
-                    status: e.target.value as Status,
-                    updatedAt: new Date().toISOString(),
-                  },
+                void onUpdate(
+                  { status: e.target.value as Status },
                   messages.todo.stateUpdated,
                 )
               }
@@ -668,7 +748,7 @@ export function TodoDetail({
                   !e.nativeEvent.isComposing
                 ) {
                   e.preventDefault();
-                  post();
+                  void post();
                 }
               }}
             />
