@@ -101,7 +101,7 @@ describe("バックアップの復元", () => {
     expect(second).toMatchObject({ added: 0, updated: 0, removed: 0 });
     expect(second.todos[0].notes).toHaveLength(2);
   });
-  it("ないTODOだけ追加では同じIDのパラメータとメモを変更しない", () => {
+  it("新規追加では同じIDのパラメータとメモを変更しない", () => {
     const local = task("same", {
       title: "端末のタイトル",
       notes: [note("local", "元", "2026-10-01T00:00:00Z")],

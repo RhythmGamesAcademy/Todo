@@ -417,7 +417,6 @@ export default function App() {
             onSave={saveDraft}
             onCancel={closeView}
             onDirty={setDirty}
-            ask={ask}
           />
         </Modal>
       )}
@@ -444,7 +443,6 @@ export default function App() {
               }
             }}
             onDirty={setDirty}
-            ask={ask}
           />
         </Modal>
       )}

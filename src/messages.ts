@@ -97,15 +97,6 @@ export const messages = {
       "件のメモを削除します。入力中のメモも破棄されます。",
     titleRequired: "タイトルを入力してください。",
     invalidDeadline: "有効な期限日時を入力してください。",
-    noDeadlineConfirm: {
-      createTitle: "期限なしで作成しますか？",
-      saveTitle: "期限なしで保存しますか？",
-      description:
-        "期限なしのTODOは期限順の最後に表示されます。期限はあとから設定できます。",
-      create: "期限なしで作成",
-      save: "期限なしで保存",
-      set: "期限を設定する",
-    },
   },
   discard: {
     title: "入力中の内容を破棄しますか？",
@@ -209,8 +200,15 @@ export const messages = {
       target: "削除対象",
       done: "完了済みのTODO",
       all: "すべてのTODO",
-      action: "まとめて削除",
-      notice: "メモも削除されます。元に戻せません。",
+      actions: {
+        done: "完了済みのTODOを削除する",
+        all: "すべてのTODOを削除する",
+      },
+      confirm: "削除する",
+      cancel: "キャンセルする",
+      todoCount: (count: number) => "TODO " + count + "件",
+      noteCount: (count: number) => "メモ " + count + "件",
+      notice: "関連するメモも削除されます。この操作は取り消せません。",
       doneTitle: "完了済みのTODOを削除しますか？",
       allTitle: "すべてのTODOを削除しますか？",
       confirmation: (todos: number, notes: number) =>
@@ -253,19 +251,9 @@ export const messages = {
   },
   dateTime: {
     headerDate: (d: Date) =>
-      d.getFullYear() +
-      "年" +
-      pad(d.getMonth() + 1) +
-      "月" +
-      pad(d.getDate()) +
-      "日",
+      d.getFullYear() + "/" + pad(d.getMonth() + 1) + "/" + pad(d.getDate()),
     headerTime: (d: Date) =>
-      pad(d.getHours()) +
-      "時" +
-      pad(d.getMinutes()) +
-      "分" +
-      pad(d.getSeconds()) +
-      "秒",
+      pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()),
     clock: (d: Date) =>
       d.getFullYear() +
       "年" +

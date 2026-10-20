@@ -39,6 +39,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("ヘッダーの時計", () => {
+  it("2桁の日時を毎秒更新し、日付が変わっても同じ時計に反映する", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 2, 23, 59, 58));
+    render(<App />);
+    const clock = screen.getByLabelText(messages.app.currentTime);
+    const date = () => clock.querySelector(".clock-date")?.textContent;
+    const time = () => clock.querySelector(".clock-time")?.textContent;
+    expect(date()).toBe("2026/01/02");
+    expect(time()).toBe("23:59:58");
+    act(() => vi.advanceTimersByTime(1000));
+    expect(time()).toBe("23:59:59");
+    act(() => vi.advanceTimersByTime(1000));
+    expect(date()).toBe("2026/01/03");
+    expect(time()).toBe("00:00:00");
+    expect(clock.querySelector("time")?.dateTime).toBe(
+      new Date(2026, 0, 3).toISOString(),
+    );
+  });
+});
+
 describe("一覧の表示形式", () => {
   it("簡潔表示は必要な項目だけを表示し、検索・並び順を維持して詳細を開く。表示形式を再読み込み後も保つ", async () => {
     const t = task();
@@ -77,7 +98,7 @@ describe("一覧の表示形式", () => {
     expect(row.classList.contains("todo-compact")).toBe(true);
     expect(within(row).getByText("TODOアプリを作る")).toBeTruthy();
     expect(within(row).getByText("優先度 高")).toBeTruthy();
-    expect(within(row).queryByText("進行中")).toBeNull();
+    expect(within(row).getByText("進行中")).toBeTruthy();
     expect(within(row).queryByText("一覧には不要な進捗メモ")).toBeNull();
     expect(within(row).queryByText("詳細を開く")).toBeNull();
     expect(row.querySelector(".card-date")?.textContent).toContain("10月30日");
@@ -222,7 +243,7 @@ describe("利用者の操作", () => {
       "high",
     ]);
     await user.type(screen.getByLabelText(/^タイトル/), "低い優先度の課題");
-    fireEvent.change(screen.getByLabelText("期限"), {
+    fireEvent.change(screen.getByLabelText(/^期限\s*(必須)?$/), {
       target: { value: "2026-10-30T23:59" },
     });
     await user.click(radios[0]);
@@ -255,7 +276,29 @@ describe("利用者の操作", () => {
       ),
     ).toEqual(["ボタンから送信", "キーボードから送信"]);
   });
-  it("期限なしの作成前に確認し、戻れば保存せず、承認後だけ作成する", async () => {
+  it("タイトルの上限と現在の文字数を表示し、必須の入力欄を示す", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    const form = screen.getByRole("dialog").querySelector("form")!;
+    const title = screen.getByLabelText(/^タイトル/);
+    const deadline = screen.getByLabelText(/^期限\s*(必須)?$/);
+    expect(title).toHaveProperty("maxLength", 120);
+    expect(title).toHaveProperty("required", true);
+    expect(deadline).toHaveProperty("required", true);
+    expect(within(form).getByText("0 / 120")).toBeTruthy();
+    expect(within(form).getByText("0 / 2000")).toBeTruthy();
+    expect(within(form).getAllByText(messages.common.required)).toHaveLength(2);
+    await user.type(title, "あ".repeat(121));
+    expect(title).toHaveProperty("value", "あ".repeat(120));
+    expect(within(form).getByText("120 / 120")).toBeTruthy();
+    await user.clear(title);
+    expect(within(form).getByText("0 / 120")).toBeTruthy();
+    await user.click(screen.getByLabelText("期限を設定しない"));
+    expect(within(form).getAllByText(messages.common.required)).toHaveLength(1);
+    expect(form.querySelector("#todo-deadline")).toBeNull();
+  });
+  it("期限なしを選べば追加の確認なしで作成できる", async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "新しいTODO" }));
@@ -266,31 +309,7 @@ describe("利用者の操作", () => {
         name: "TODOを作成",
       }),
     );
-    let warning = screen.getByRole("alertdialog");
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-    await user.click(
-      within(warning).getByRole("button", { name: "期限を設定する" }),
-    );
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(screen.getByLabelText(/^タイトル/)).toHaveProperty(
-      "value",
-      "本を読む",
-    );
-    expect(screen.getByLabelText("期限を設定しない")).toHaveProperty(
-      "checked",
-      false,
-    );
-    expect(screen.getByLabelText("期限")).toBeTruthy();
-    await user.click(screen.getByLabelText("期限を設定しない"));
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "TODOを作成",
-      }),
-    );
-    warning = screen.getByRole("alertdialog");
-    await user.click(
-      within(warning).getByRole("button", { name: "期限なしで作成" }),
-    );
     const saved = parseTodos(localStorage.getItem(STORAGE_KEY)!);
     expect(saved).toHaveLength(1);
     expect(saved[0].deadline).toBeNull();
@@ -303,12 +322,32 @@ describe("利用者の操作", () => {
       screen.queryByRole("link", { name: /Googleカレンダーに登録/ }),
     ).toBeNull();
   });
+  it("期限ありのTODOも追加の確認なしで期限なしに変更できる", async () => {
+    seed();
+    const before = parseTodos(localStorage.getItem(STORAGE_KEY)!)[0];
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", {
+        name: messages.todo.openLabel(before.title),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: messages.todo.edit }));
+    await user.click(screen.getByLabelText(messages.todo.omitDeadline));
+    await user.click(screen.getByRole("button", { name: messages.todo.save }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0]).toMatchObject({
+      ...before,
+      deadline: null,
+      updatedAt: expect.any(String),
+    });
+  });
   it("期限を持つTODOを作成し、登録用リンクを表示する", async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "新しいTODO" }));
     await user.type(screen.getByLabelText(/^タイトル/), "レポートを提出");
-    fireEvent.change(screen.getByLabelText("期限"), {
+    fireEvent.change(screen.getByLabelText(/^期限\s*(必須)?$/), {
       target: { value: "2026-10-30T23:59" },
     });
     await user.click(
@@ -415,7 +454,7 @@ describe("利用者の操作", () => {
       "checked",
       false,
     );
-    expect(screen.getByLabelText("期限")).toBeTruthy();
+    expect(screen.getByLabelText(/^期限\s*(必須)?$/)).toBeTruthy();
   });
   it("キャッチコピーやサンプル操作を表示しない", () => {
     render(<App />);
