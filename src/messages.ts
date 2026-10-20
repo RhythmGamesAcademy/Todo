@@ -125,6 +125,22 @@ export const messages = {
     sent: "送信しました",
     revealing: "メモを表示中",
   },
+  login: {
+    heading: "共有TODOへ参加",
+    joinTab: "既存リストに参加",
+    joinToken: "共有トークン",
+    joinName: "あなたの名前",
+    createTab: "新しいリストを作る",
+    createListTitle: "リストのタイトル",
+    createListName: "あなたの名前",
+    joinAction: "参加",
+    createAction: "作成",
+    creating: "作成中…",
+    joining: "参加中…",
+    invalidToken: "共有トークンが正しくありません。",
+    duplicatedName:
+      "同じ名前のメンバーがいます。異なる名前を入力してください。",
+  },
   calendar: {
     register: "Googleカレンダーに登録",
     openLabel: "Googleカレンダーに登録（別タブで開く）",
