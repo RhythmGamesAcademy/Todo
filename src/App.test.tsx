@@ -19,7 +19,6 @@ import type { Todo } from "./model";
 const createButton = () =>
   within(screen.getByRole("main")).getAllByRole("button", {
     name: messages.todo.create,
-    exact: true,
   })[0];
 
 beforeEach(() => {
