@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  calendarUrl,
-  isOverdue,
-  parseTodos,
-  selectTodos,
-  serializeTodos,
-  toDateInput,
-} from "./model";
+import { calendarUrl, isOverdue, selectTodos, toDateInput } from "./model";
 import { nextDeadlineId } from "./model";
 import type { Todo } from "./model";
 const now = new Date("2026-10-18T12:00:00+09:00");
@@ -149,48 +142,11 @@ describe("TODOの表示と保存", () => {
     expect(url.searchParams.get("details")).toContain(task.description);
     expect(calendarUrl({ ...task, deadline: null })).toBe(null);
   });
-  it("バックアップでメモと日時を保持できる", () => {
+  it("期限の日時を入力欄の形式に変換しても時刻を保つ", () => {
     const task = make("task", now.toISOString());
-    task.notes = [
-      {
-        id: "n",
-        text: "メモ",
-        createdAt: now.toISOString(),
-        editedAt: now.toISOString(),
-      },
-    ];
-    expect(parseTodos(serializeTodos([task]))).toEqual([task]);
     expect(new Date(toDateInput(task.deadline!)).getTime()).toBe(
       new Date(task.deadline!).getTime(),
     );
-  });
-  it("担当者導入前のバックアップは担当者なしとして復元する", () => {
-    const legacy: Record<string, unknown> = { ...make("legacy", null) };
-    delete legacy.assigneeId;
-    const [task] = parseTodos(JSON.stringify({ version: 1, todos: [legacy] }));
-    expect(task.assigneeId).toBeNull();
-    expect(task).toEqual({ ...legacy, assigneeId: null });
-    const [assigned] = parseTodos(
-      serializeTodos([{ ...make("assigned", null), assigneeId: "u1" }]),
-    );
-    expect(assigned.assigneeId).toBe("u1");
-  });
-  it("壊れた形式、重複ID、不正な日時・メモは復元しない", () => {
-    const task = make("task", null);
-    for (const raw of [
-      "not json",
-      JSON.stringify([]),
-      serializeTodos([task, task]),
-      serializeTodos([{ ...task, deadline: "invalid" }]),
-      serializeTodos([{ ...task, assigneeId: 1 } as unknown as Todo]),
-      serializeTodos([
-        {
-          ...task,
-          notes: [{ id: "n", text: "", createdAt: now.toISOString() }],
-        },
-      ]),
-    ])
-      expect(() => parseTodos(raw)).toThrow();
   });
 });
 

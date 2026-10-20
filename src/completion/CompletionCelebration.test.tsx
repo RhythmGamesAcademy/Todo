@@ -10,8 +10,16 @@ import {
 } from "@testing-library/react";
 import App from "../App";
 import { messages } from "../messages";
-import { parseTodos, serializeTodos, STORAGE_KEY } from "../model";
 import type { Todo } from "../model";
+
+const TEST_STORAGE_KEY = "hitotsuzutsu.completion-test.v1";
+const readStored = (): Todo[] => {
+  const raw = localStorage.getItem(TEST_STORAGE_KEY);
+  return raw ? (JSON.parse(raw) as Todo[]) : [];
+};
+const writeStored = (todos: Todo[]) => {
+  localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(todos));
+};
 
 const remote = vi.hoisted(() => {
   const listeners = new Set<() => void>();
@@ -27,15 +35,15 @@ const remote = vi.hoisted(() => {
 
 vi.mock("../cloud/useBoard", async () => {
   const { useSyncExternalStore } = await import("react");
-  const { parseTodos, serializeTodos, STORAGE_KEY } = await import("../model");
+  const key = "hitotsuzutsu.completion-test.v1";
   const removed = new Map<string, Todo>();
   const now = () => new Date().toISOString();
   const read = (): Todo[] => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? parseTodos(raw) : [];
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as Todo[]) : [];
   };
   const write = (todos: Todo[]) => {
-    localStorage.setItem(STORAGE_KEY, serializeTodos(todos));
+    localStorage.setItem(key, JSON.stringify(todos));
     remote.notify();
   };
   return {
@@ -174,7 +182,7 @@ let destination = rect(288, 80, 14, 18);
 
 beforeEach(() => {
   localStorage.clear();
-  localStorage.setItem(STORAGE_KEY, serializeTodos([task]));
+  writeStored([task]);
   plays = [];
   destination = rect(288, 80, 14, 18);
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
@@ -267,7 +275,7 @@ describe("完了のトド演出", () => {
         id: "other-" + index,
         title: "other-" + index,
       }));
-      localStorage.setItem(STORAGE_KEY, serializeTodos([task, ...others]));
+      writeStored([task, ...others]);
       render(<App />);
       // Starting in another filter still stages the animation on the unfinished tab.
       fireEvent.click(
@@ -302,9 +310,7 @@ describe("完了のトド演出", () => {
     const mounted = render(<App />);
     openTask();
     complete();
-    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].status).toBe(
-      "done",
-    );
+    expect(readStored()[0].status).toBe("done");
     expect(plays).toHaveLength(0);
     expect(counter().textContent).toBe("0");
     await closeTask();
@@ -350,9 +356,7 @@ describe("完了のトド演出", () => {
     expect(
       screen.getByRole("button", { name: messages.todo.openLabel(task.title) }),
     ).toBeTruthy();
-    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes).toEqual(
-      task.notes,
-    );
+    expect(readStored()[0].notes).toEqual(task.notes);
     mounted.unmount();
     render(<App />);
     expect(plays).toHaveLength(5);
@@ -387,9 +391,7 @@ describe("完了のトド演出", () => {
       plays[0].finish();
     });
     expect(plays).toHaveLength(1);
-    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].status).toBe(
-      "done",
-    );
+    expect(readStored()[0].status).toBe("done");
   });
   it("完了を取り消してから閉じた場合は演出しない", async () => {
     render(<App />);
@@ -431,9 +433,7 @@ describe("完了のトド演出", () => {
     await closeTask();
     expect(plays).toHaveLength(0);
     expect(counter().textContent).toBe("0");
-    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].status).toBe(
-      "doing",
-    );
+    expect(readStored()[0].status).toBe("doing");
   });
   it("未送信メモがある間は入力破棄の確認を保ち、入力を続けると演出は始まらない", async () => {
     render(<App />);

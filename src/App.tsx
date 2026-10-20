@@ -665,11 +665,6 @@ export default function App() {
           notice={toast?.message}
         >
           <div className="data-content">
-            {actionError && (
-              <p className="modal-error" role="alert">
-                {actionError}
-              </p>
-            )}
             <div className="data-notice">
               <LockKeyhole size={21} />
               <div>
@@ -678,15 +673,8 @@ export default function App() {
               </div>
             </div>
             <DataPanel
-              todos={todos}
-              recovery={null}
-              save={() => false}
-              ask={ask}
+              state={board.state}
               notify={(message) => setToast({ message })}
-              onRestored={() => {
-                setSearch("");
-                setFilter("all");
-              }}
             />
           </div>
         </Modal>

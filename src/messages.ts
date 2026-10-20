@@ -95,7 +95,6 @@ export const messages = {
     required: "必須",
     optional: "任意",
     characters: (current: number, max: number) => current + " / " + max,
-    items: (count: number) => count + "件",
   },
   status: statusLabels,
   priority: priorityLabels,
@@ -272,125 +271,24 @@ export const messages = {
     eventTitle: (title: string) => "【締切】" + title,
   },
   data: {
-    title: "データの保存・復元",
-    open: "データの保存・復元を開く",
-    location: "保存先：このブラウザ",
+    title: "データの書き出し",
+    location: "保存先：サーバー",
     storageNotice:
-      "ブラウザのサイトデータを削除すると、TODOとメモも消去されます。",
+      "リストのデータはサーバー上に保存され、全メンバーと共有されます。",
+    cloudSummary: (title: string, members: number) =>
+      "「" + title + "」・メンバー " + members + "人",
     summary: (todos: number, notes: number) =>
       "TODO " + todos + "件・メモ " + notes + "件",
-    storageSize: (kib: string) => "保存量（概算）" + kib + " KiB",
     exportTitle: "バックアップを書き出す",
     export: "書き出す",
     exportStarted: "バックアップの書き出しを開始しました",
-    backupFilename: (date: string) => "todo-" + date + ".json",
-    restoreTitle: "バックアップから復元する",
-    method: "復元方法",
-    restore: "復元する",
-    fileLabel: "復元するJSONファイル",
-    chooseFile: "ファイルを選ぶ",
-    loading: "読み込み中…",
-    modes: {
-      replace: {
-        label: "完全上書き",
-        description: "現在のTODOとメモを、ファイルの内容に置き換えます。",
-        confirmation: "現在のTODOとメモを置き換えます。元に戻せません。",
-      },
-      merge: {
-        label: "更新＋新規追加",
-        description:
-          "同じIDは読み込んだ値で更新し、メモを時系列に統合。新しいIDも追加します。",
-        confirmation:
-          "同じIDの項目は読み込んだ値を採用します。メモは日時順に統合し、同じメモIDは読み込んだ内容を採用します。",
-      },
-      add: {
-        label: "ないTODOだけ追加",
-        description:
-          "新しいIDだけ追加します。同じIDのTODOとメモは変更しません。",
-        confirmation: "既存のTODOとメモは変更しません。",
-      },
-    },
-    restoreConfirmTitle: (mode: string) => mode + "で復元しますか？",
-    restoreConfirmDescription: (
-      added: number,
-      updated: number,
-      removed: number,
-      detail: string,
-    ) =>
-      "追加 " +
-      added +
-      "件、更新 " +
-      updated +
-      "件、削除 " +
-      removed +
-      "件。" +
-      detail,
-    restored: (added: number, updated: number, removed: number) =>
-      "復元しました（追加 " +
-      added +
-      "件・更新 " +
-      updated +
-      "件・削除 " +
-      removed +
-      "件）",
-    preview: {
-      added: "追加",
-      updated: "更新",
-      removed: "削除",
-      total: "復元後",
-      unchanged: "変更対象がありません。",
-    },
-    replaceOnly: "保存データを読み込めないため、完全上書きのみ利用できます。",
-    bulk: {
-      title: "TODOの一括削除",
-      target: "削除対象",
-      done: "完了済みのTODO",
-      all: "すべてのTODO",
-      action: "まとめて削除",
-      notice: "メモも削除されます。元に戻せません。",
-      doneTitle: "完了済みのTODOを削除しますか？",
-      allTitle: "すべてのTODOを削除しますか？",
-      confirmation: (todos: number, notes: number) =>
-        "TODO " +
-        todos +
-        "件とメモ " +
-        notes +
-        "件を削除します。元に戻せません。必要なデータは先に書き出してください。",
-      deleted: (count: number) => "TODO " + count + "件を削除しました",
-    },
-    recovery: {
-      title: "読み込めないデータを初期化",
-      description:
-        "先に書き出しを行ってください。初期化すると、現在の保存データは削除されます。",
-      action: "保存データを初期化",
-      confirmTitle: "保存データを初期化しますか？",
-      confirmDescription:
-        "この操作で保存されているTODOとメモをすべて削除します。元に戻せません。",
-      confirm: "初期化する",
-      done: "保存データを初期化しました",
-    },
+    exportFilename: (date: string) => "todo-cloud-" + date + ".json",
   },
   errors: {
     api: {
       general: "通信エラーが発生しました。再試行してください。",
     },
     invalidState: "共有データを読み込めませんでした",
-    invalidBackup: "対応するバックアップ形式ではありません。",
-    invalidTodo: "TODOのデータが正しくありません。",
-    invalidNote: "メモのデータが正しくありません。",
-    tooManyTodos: "復元後のTODOは10,000件以内にしてください。",
-    restore: "復元できません。",
-    readFile: "ファイルを読み込めませんでした。",
-    fileTooLarge: "10MB以下のJSONファイルを選択してください。",
-    changedBeforeRestore:
-      "確認中に保存データが更新されました。変更件数を確認し、もう一度実行してください。",
-    changedBeforeDelete:
-      "確認中に保存データが更新されました。削除対象を確認し、もう一度実行してください。",
-    corruptStorage:
-      "保存データを読み込めませんでした。元のデータは変更していません。「データの保存」から書き出し、または復元してください。",
-    storageUnavailable:
-      "ブラウザの保存領域を利用できません。設定でサイトデータの保存を許可してください。",
-    save: "保存できませんでした。保存容量やブラウザの設定を確認してください。変更は保存されていません。",
   },
   dateTime: {
     headerDate: (d: Date) =>
