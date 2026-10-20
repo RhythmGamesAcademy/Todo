@@ -930,3 +930,30 @@ describe("直近の期限の表示", () => {
     expect(laterButton().getAttribute("aria-description")).toBe("直近の期限");
   });
 });
+
+describe("管理画面", () => {
+  it("導線から開き、メンバー名の変更を board に渡す", async () => {
+    ready([task()]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      within(document.querySelector(".sidebar") as HTMLElement).getByRole(
+        "button",
+        { name: messages.manage.title },
+      ),
+    );
+    const input = screen.getByRole("textbox", {
+      name: messages.manage.memberNameLabel("佐藤"),
+    });
+    await user.clear(input);
+    await user.type(input, "佐藤（改）");
+    await user.click(
+      within(input.closest("form") as HTMLElement).getByRole("button", {
+        name: messages.manage.save,
+      }),
+    );
+    await waitFor(() =>
+      expect(board.renameMember).toHaveBeenCalledWith("other", "佐藤（改）"),
+    );
+  });
+});

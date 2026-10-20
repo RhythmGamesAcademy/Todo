@@ -214,6 +214,38 @@ export const messages = {
     ...timelineCopy,
     line: timelineLine,
   },
+  manage: {
+    title: "リスト管理",
+    listTitleLabel: "リストのタイトル",
+    save: "保存",
+    membersTitle: "メンバー",
+    memberNameLabel: (name: string) => name + "の名前",
+    assignedCount: (count: number) => count + "件担当",
+    joinedAt: "参加日",
+    you: "あなた",
+    removeMember: "削除",
+    removeMemberTitle: (name: string) => "「" + name + "」を削除しますか？",
+    removeMemberDescription: (name: string) =>
+      "「" +
+      name +
+      "」をリストから削除します。担当中のTODOは未割り当てになります。",
+    removeSelfHint: "自分自身を削除すると、この画面に戻れなくなります。",
+    deleteList: "リストを削除",
+    deleteListTitle: "リストを削除しますか？",
+    deleteListWarning:
+      "リストを削除すると、このリストのすべてのTODO・メモ・変更履歴が完全に削除されます。元に戻せません。",
+    deleteListAction: "リストを削除する",
+    deleteListConfirmTitle: "本当にリストを削除しますか？",
+    deleteListConfirmDescription:
+      "すべてのタスク・メモ・履歴が削除されます。取り消せません。",
+    deleteListConfirm: "削除する",
+    dangerTitle: "リストの削除",
+    shareLabel: "共有URL",
+    copyShare: "共有URLをコピー",
+    copied: "共有URLをコピーしました",
+    dataTitle: "データ",
+    dataExport: "データの書き出し・復元",
+  },
   login: {
     heading: "共有TODOへ参加",
     joinTab: "既存リストに参加",

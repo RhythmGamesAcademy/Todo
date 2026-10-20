@@ -5,12 +5,12 @@ import {
   ArrowDownUp,
   Check,
   ChevronRight,
-  HardDrive,
   LayoutGrid,
   List,
   LockKeyhole,
   Plus,
   Search,
+  Settings,
   UserRound,
   X,
 } from "lucide-react";
@@ -38,6 +38,7 @@ import { DataPanel } from "./DataPanel";
 import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
 import { LoginScreen } from "./screens/LoginScreen";
+import { ManageScreen } from "./screens/ManageScreen";
 import { TodoNavigation } from "./components/TodoNavigation";
 import { CompletionCelebration } from "./completion/CompletionCelebration";
 import { useCompletionQueue } from "./completion/useCompletionQueue";
@@ -46,6 +47,7 @@ type View =
   | { type: "create" }
   | { type: "detail" | "edit"; id: string; setDeadline?: boolean }
   | { type: "data" }
+  | { type: "manage" }
   | null;
 type Confirm = AskOptions & { resolve: (answer: boolean) => void };
 type Undo = { id: string };
@@ -63,6 +65,7 @@ export default function App() {
     writeSession(null);
     setCurrentSession(null);
     setPrefillToken(null);
+    setView(null);
   }, []);
   const board = useBoard(currentSession, onSessionLost);
   const state = board.phase === "ready" ? board.state : null;
@@ -157,6 +160,12 @@ export default function App() {
       setDirty(false);
     }
   }, [board.phase, view, selected]);
+  useEffect(() => {
+    // 別端末で自分が削除された場合も、セッションを失効させて参加画面へ戻す。
+    if (board.phase !== "ready") return;
+    if (!board.state.users.some((user) => user.id === board.me.userId))
+      onSessionLost();
+  }, [board, onSessionLost]);
   async function act(call: () => Promise<unknown>) {
     setActionError(null);
     try {
@@ -342,10 +351,10 @@ export default function App() {
           </div>
           <button
             className="mobile-data icon-button"
-            onClick={() => setView({ type: "data" })}
-            aria-label={messages.data.title}
+            onClick={() => setView({ type: "manage" })}
+            aria-label={messages.manage.title}
           >
-            <HardDrive size={21} />
+            <Settings size={21} />
           </button>
         </div>
       </header>
@@ -365,11 +374,11 @@ export default function App() {
           <button
             className="storage-nav"
             onClick={() => {
-              setView({ type: "data" });
+              setView({ type: "manage" });
             }}
           >
-            <HardDrive size={18} />
-            <span>{messages.data.title}</span>
+            <Settings size={18} />
+            <span>{messages.manage.title}</span>
             <ChevronRight size={15} />
           </button>
         </div>
@@ -614,6 +623,38 @@ export default function App() {
               }
             }}
             onDelete={() => deleteTodo(selected)}
+          />
+        </Modal>
+      )}
+      {view?.type === "manage" && (
+        <Modal
+          title={messages.manage.title}
+          onClose={closeView}
+          notice={toast?.message}
+          wide
+        >
+          {actionError && (
+            <p className="modal-error" role="alert">
+              {actionError}
+            </p>
+          )}
+          <ManageScreen
+            state={board.state}
+            meId={board.me.userId}
+            token={board.me.token}
+            ask={ask}
+            onRenameList={(title) => act(() => board.renameBoard(title))}
+            onRemoveList={() => act(() => board.removeBoard())}
+            onRenameMember={(id, name) =>
+              act(() => board.renameMember(id, name))
+            }
+            onRemoveMember={(id) => act(() => board.removeMember(id))}
+            onSessionLost={onSessionLost}
+            onNotify={(message) => setToast({ message })}
+            onOpenData={() => {
+              setToast(null);
+              setView({ type: "data" });
+            }}
           />
         </Modal>
       )}
