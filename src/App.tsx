@@ -66,12 +66,18 @@ export default function App() {
     setCurrentSession(null);
     setPrefillToken(null);
     setView(null);
+    setConfirmation(null);
+    setActionError(null);
+    setDirty(false);
+    setToast(null);
+    setPendingCompletion(null);
   }, []);
   const board = useBoard(currentSession, onSessionLost);
   const state = board.phase === "ready" ? board.state : null;
   const todos = state ? state.todos : [];
   const users = state ? state.users : [];
   const activities = state ? state.activities : [];
+  const meId = board.phase === "ready" ? board.me.userId : null;
   const [layout, changeLayout] = useTodoLayout();
   const [now, setNow] = useState(() => new Date());
   const [filter, setFilter] = useState<Filter>("all");
@@ -608,6 +614,7 @@ export default function App() {
             todo={selected}
             now={now}
             users={users}
+            meId={meId}
             activities={activities.filter(
               (activity) => activity.todoId === selected.id,
             )}

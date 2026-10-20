@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages } from "../messages";
+import { ApiError } from "./client";
 import { writeSession } from "./session";
 import type { Session } from "./session";
 import type { CloudState } from "./types";
@@ -268,7 +268,7 @@ describe("アクション", () => {
     expect(result.current.state.list.revision).toBe(2);
   });
 
-  it("アクションが失敗したら error phase になり、refresh で復帰できる", async () => {
+  it("アクションが失敗しても ready のまま、呼び出し元へ拒否を返す", async () => {
     let failing = false;
     installFetch((url, init) => {
       const method = init?.method ?? "GET";
@@ -276,7 +276,7 @@ describe("アクション", () => {
       if (String(url).endsWith("/revision")) return { body: { revision: 1 } };
       return { body: makeState(1) };
     });
-    const { result } = renderBoard();
+    const { result, lost } = renderBoard();
     await flush();
     expect(result.current.phase).toBe("ready");
 
@@ -287,17 +287,32 @@ describe("アクション", () => {
       ).rejects.toThrow("network down");
     });
 
-    expect(result.current.phase).toBe("error");
-    if (result.current.phase !== "error") throw new Error("not error");
-    expect(result.current.message).toBe(messages.errors.api.general);
-    expect(result.current.retryable).toBe(true);
-
-    failing = false;
-    act(() => {
-      result.current.refresh();
-    });
-    await flush();
-
     expect(result.current.phase).toBe("ready");
+    expect(lost).not.toHaveBeenCalled();
+  });
+
+  it("アクションの 404 でもセッションを失わず、ApiError を返す", async () => {
+    installFetch((url, init) => {
+      const method = init?.method ?? "GET";
+      if (method === "PATCH")
+        return { status: 404, body: { error: "not found" } };
+      if (String(url).endsWith("/revision")) return { body: { revision: 1 } };
+      return { body: makeState(1) };
+    });
+    const { result, lost } = renderBoard();
+    await flush();
+    expect(result.current.phase).toBe("ready");
+
+    let failure: unknown;
+    await act(async () => {
+      failure = await result.current
+        .updateTodo("todo-1", { title: "変更" })
+        .catch((error: unknown) => error);
+    });
+
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).status).toBe(404);
+    expect(result.current.phase).toBe("ready");
+    expect(lost).not.toHaveBeenCalled();
   });
 });

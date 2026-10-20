@@ -58,7 +58,6 @@ export function useBoard(
   const lostRef = useRef(onSessionLost);
   lostRef.current = onSessionLost;
   const reloadRef = useRef<() => Promise<void>>(async () => {});
-  const failRef = useRef<(error: unknown) => void>(() => {});
 
   useEffect(() => {
     if (token === null || userId === null || name === null) {
@@ -115,7 +114,6 @@ export function useBoard(
     };
 
     reloadRef.current = load;
-    failRef.current = fail;
     polling = false;
     revision = -1;
     setBoard({ phase: "loading" });
@@ -136,12 +134,9 @@ export function useBoard(
   const run = useCallback(async (call: (token: string) => Promise<unknown>) => {
     const current = sessionRef.current;
     if (!current) return;
-    try {
-      await call(current.token);
-    } catch (error) {
-      failRef.current(error);
-      throw error;
-    }
+    // 変更操作の失敗は呼び出し元へ返し、一覧の表示やセッションを保つ。
+    // セッション失効の判定は初回取得とポーリングの 404 だけに限る。
+    await call(current.token);
     await reloadRef.current();
   }, []);
 
