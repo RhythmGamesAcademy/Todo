@@ -15,6 +15,13 @@ import { messages } from "./messages";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
 
+// Both the heading and empty state can offer the same creation action.
+const createButton = () =>
+  within(screen.getByRole("main")).getAllByRole("button", {
+    name: messages.todo.create,
+    exact: true,
+  })[0];
+
 beforeEach(() => {
   localStorage.clear();
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
@@ -40,23 +47,27 @@ afterEach(() => {
 });
 
 describe("ヘッダーの時計", () => {
-  it("2桁の日時を毎秒更新し、日付が変わっても同じ時計に反映する", () => {
+  it("設定された書式で毎秒更新し、日付が変わっても同じ時計に反映する", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 0, 2, 23, 59, 58));
     render(<App />);
     const clock = screen.getByLabelText(messages.app.currentTime);
-    const date = () => clock.querySelector(".clock-date")?.textContent;
-    const time = () => clock.querySelector(".clock-time")?.textContent;
-    expect(date()).toBe("2026/01/02");
-    expect(time()).toBe("23:59:58");
+    const expectClock = (expected: Date) => {
+      expect(clock.querySelector(".clock-date")?.textContent).toBe(
+        messages.dateTime.headerDate(expected),
+      );
+      expect(clock.querySelector(".clock-time")?.textContent).toBe(
+        messages.dateTime.headerTime(expected),
+      );
+      expect(clock.querySelector("time")?.dateTime).toBe(
+        expected.toISOString(),
+      );
+    };
+    expectClock(new Date(2026, 0, 2, 23, 59, 58));
     act(() => vi.advanceTimersByTime(1000));
-    expect(time()).toBe("23:59:59");
+    expectClock(new Date(2026, 0, 2, 23, 59, 59));
     act(() => vi.advanceTimersByTime(1000));
-    expect(date()).toBe("2026/01/03");
-    expect(time()).toBe("00:00:00");
-    expect(clock.querySelector("time")?.dateTime).toBe(
-      new Date(2026, 0, 3).toISOString(),
-    );
+    expectClock(new Date(2026, 0, 3));
   });
 });
 
@@ -233,7 +244,7 @@ describe("利用者の操作", () => {
   it("優先度は左から低・中・高の順で選べて、選んだ値で保存する", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    await user.click(createButton());
     const radios = within(
       screen.getByRole("group", { name: "優先度" }),
     ).getAllByRole("radio");
@@ -249,7 +260,7 @@ describe("利用者の操作", () => {
     await user.click(radios[0]);
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
-        name: "TODOを作成",
+        name: messages.todo.createAction,
       }),
     );
     expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].priority).toBe(
@@ -279,7 +290,7 @@ describe("利用者の操作", () => {
   it("タイトルの上限と現在の文字数を表示し、必須の入力欄を示す", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    await user.click(createButton());
     const form = screen.getByRole("dialog").querySelector("form")!;
     const title = screen.getByLabelText(/^タイトル/);
     const deadline = screen.getByLabelText(/^期限\s*(必須)?$/);
@@ -301,12 +312,12 @@ describe("利用者の操作", () => {
   it("期限なしを選べば追加の確認なしで作成できる", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    await user.click(createButton());
     await user.type(screen.getByLabelText(/^タイトル/), "本を読む");
     await user.click(screen.getByLabelText("期限を設定しない"));
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
-        name: "TODOを作成",
+        name: messages.todo.createAction,
       }),
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -345,14 +356,14 @@ describe("利用者の操作", () => {
   it("期限を持つTODOを作成し、登録用リンクを表示する", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    await user.click(createButton());
     await user.type(screen.getByLabelText(/^タイトル/), "レポートを提出");
     fireEvent.change(screen.getByLabelText(/^期限\s*(必須)?$/), {
       target: { value: "2026-10-30T23:59" },
     });
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
-        name: "TODOを作成",
+        name: messages.todo.createAction,
       }),
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -471,7 +482,7 @@ describe("利用者の操作", () => {
   it("入力中のフォームを閉じる前に確認し、続けると入力を残す", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
+    await user.click(createButton());
     await user.type(screen.getByLabelText(/^タイトル/), "途中の入力");
     await user.click(screen.getByRole("button", { name: "閉じる" }));
     const warning = screen.getByRole("alertdialog");
@@ -547,10 +558,7 @@ describe("利用者の操作", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "元のデータは変更していません",
     );
-    expect(screen.getByRole("button", { name: "新しいTODO" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(createButton()).toHaveProperty("disabled", true);
     expect(
       screen.getByRole("button", { name: /データの保存・復元を開く/ }),
     ).toBeTruthy();
