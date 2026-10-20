@@ -1,5 +1,80 @@
 // UI text and formatting live here. Replace this dictionary to add another locale.
 const pad = (value: number) => String(value).padStart(2, "0");
+const timelineCopy = {
+  heading: "変更履歴",
+  empty: "まだ記録はありません",
+  memoFallback: "削除されたメンバー",
+};
+const statusLabels = { todo: "未着手", doing: "進行中", done: "完了" };
+const priorityLabels = { high: "高", medium: "中", low: "低" };
+const noDeadlineLabel = "期限なし";
+const assigneeNoneLabel = "担当者なし";
+const timelineFieldLabels: Record<string, string> = {
+  title: "タイトル",
+  description: "説明",
+  deadline: "期限",
+  priority: "優先度",
+  status: "状態",
+  assignee: "担当者",
+};
+function timelineDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return (
+    date.getFullYear() +
+    "年" +
+    (date.getMonth() + 1) +
+    "月" +
+    date.getDate() +
+    "日 " +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes())
+  );
+}
+function timelineValue(field: string, value: string | null) {
+  switch (field) {
+    case "status":
+      return value
+        ? ((statusLabels as Record<string, string>)[value] ?? value)
+        : "";
+    case "priority":
+      return value
+        ? ((priorityLabels as Record<string, string>)[value] ?? value)
+        : "";
+    case "deadline":
+      return value ? timelineDate(value) : noDeadlineLabel;
+    case "assignee":
+      return value ? "「" + value + "」" : assigneeNoneLabel;
+    default:
+      return "「" + (value ?? "") + "」";
+  }
+}
+function timelineLine(
+  userName: string | null,
+  kind: string,
+  field: string | null,
+  before: string | null,
+  after: string | null,
+) {
+  const actor = userName ?? timelineCopy.memoFallback;
+  if (kind === "todo.created") return actor + "がTODOを作成しました";
+  if (kind === "todo.deleted") return actor + "がTODOを削除しました";
+  if (kind === "todo.restored") return actor + "がTODOを元に戻しました";
+  if (kind !== "todo.updated" || !field) return "";
+  const label = timelineFieldLabels[field];
+  if (!label) return "";
+  return (
+    actor +
+    "が" +
+    label +
+    "を" +
+    timelineValue(field, before) +
+    "から" +
+    timelineValue(field, after) +
+    "に変更しました"
+  );
+}
 export const messages = {
   locale: "ja",
   app: {
@@ -23,8 +98,8 @@ export const messages = {
     characters: (current: number, max: number) => current + " / " + max,
     items: (count: number) => count + "件",
   },
-  status: { todo: "未着手", doing: "進行中", done: "完了" },
-  priority: { high: "高", medium: "中", low: "低" },
+  status: statusLabels,
+  priority: priorityLabels,
   filters: {
     heading: {
       all: "すべてのTODO",
@@ -47,7 +122,7 @@ export const messages = {
     noResults: "検索結果なし",
     assignment: {
       any: "すべてのメンバー",
-      none: "担当者なし",
+      none: assigneeNoneLabel,
     },
   },
   search: {
@@ -80,7 +155,7 @@ export const messages = {
     title: "タイトル",
     description: "説明",
     deadline: "期限",
-    noDeadline: "期限なし",
+    noDeadline: noDeadlineLabel,
     omitDeadline: "期限を設定しない",
     priority: "優先度",
     state: "状態",
@@ -135,6 +210,10 @@ export const messages = {
     sendShortcut: "送信（Ctrl+Enter / ⌘+Enter）",
     sent: "送信しました",
     revealing: "メモを表示中",
+  },
+  activity: {
+    ...timelineCopy,
+    line: timelineLine,
   },
   login: {
     heading: "共有TODOへ参加",

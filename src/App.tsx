@@ -68,6 +68,7 @@ export default function App() {
   const state = board.phase === "ready" ? board.state : null;
   const todos = state ? state.todos : [];
   const users = state ? state.users : [];
+  const activities = state ? state.activities : [];
   const [layout, changeLayout] = useTodoLayout();
   const [now, setNow] = useState(() => new Date());
   const [filter, setFilter] = useState<Filter>("all");
@@ -598,6 +599,9 @@ export default function App() {
             todo={selected}
             now={now}
             users={users}
+            activities={activities.filter(
+              (activity) => activity.todoId === selected.id,
+            )}
             onUpdate={(patch, message) =>
               updateTodo(selected.id, patch, message)
             }

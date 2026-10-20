@@ -1128,6 +1128,46 @@ input[type="checkbox"] {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.timeline-activity {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-block: -6px;
+  padding-left: 9px;
+  color: #4c6383;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.timeline-activity::before {
+  content: "";
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #8fb0d8;
+  box-shadow: 0 0 0 4px #e4eefb;
+}
+.timeline-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+.timeline-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.timeline-time {
+  color: #8a9bb2;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-empty {
+  color: #7c8da4;
+  font-size: 12.5px;
+}
 .chat-composer {
   border: 1px solid #d9e3f0;
   border-radius: 16px;

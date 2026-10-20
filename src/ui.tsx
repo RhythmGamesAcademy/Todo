@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import {
   calendarUrl,
-  clockText,
   dateText,
   isOverdue,
   isToday,
@@ -27,8 +26,9 @@ import {
   STATUS,
   toDateInput,
 } from "./model";
-import type { Note, Priority, Status, Todo, TodoDraft } from "./model";
-import type { CloudUser, TodoPatch } from "./cloud/types";
+import type { Priority, Status, Todo, TodoDraft } from "./model";
+import type { Activity, CloudUser, TodoPatch } from "./cloud/types";
+import { Timeline } from "./screens/Timeline";
 export function Mark() {
   return (
     <img
@@ -483,103 +483,11 @@ export interface AskOptions {
   cancel?: string;
   danger?: boolean;
 }
-function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
-  const [pending, setPending] = useState(enter);
-  const row = useRef<HTMLLIElement>(null);
-  const followReveal = useRef(false);
-  // 送信完了の応答でメモが届いてから印が付く場合も、点から本文へ演出する。
-  useEffect(() => {
-    if (enter) setPending(true);
-  }, [enter]);
-  useEffect(() => {
-    if (!pending) {
-      if (followReveal.current) {
-        const list = row.current?.closest("ol");
-        if (!list || !row.current) return;
-        // Keep the unfolding text in view, but stop following if the reader scrolls.
-        const follow = () => {
-          if (followReveal.current)
-            list.scrollTo({ top: list.scrollHeight, behavior: "auto" });
-        };
-        const stop = () => {
-          followReveal.current = false;
-        };
-        const observer =
-          typeof ResizeObserver === "undefined"
-            ? null
-            : new ResizeObserver(follow);
-        observer?.observe(row.current);
-        list.addEventListener("wheel", stop, { passive: true });
-        list.addEventListener("touchstart", stop, { passive: true });
-        list.addEventListener("keydown", stop);
-        follow();
-        const timer = window.setTimeout(() => {
-          observer?.disconnect();
-          stop();
-        }, 520);
-        return () => {
-          window.clearTimeout(timer);
-          observer?.disconnect();
-          list.removeEventListener("wheel", stop);
-          list.removeEventListener("touchstart", stop);
-          list.removeEventListener("keydown", stop);
-        };
-      }
-      return;
-    }
-    function reveal() {
-      const list = row.current?.closest("ol");
-      followReveal.current =
-        !!list && list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-      setPending(false);
-    }
-    const timer = window.setTimeout(reveal, 420);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [pending]);
-  return (
-    <li
-      ref={row}
-      className={"chat-message " + (enter ? "chat-message-new" : "")}
-    >
-      <span className="avatar" aria-hidden="true">
-        <UserRound size={21} strokeWidth={1.7} />
-      </span>
-      <div className="message-content">
-        <span className="message-name">{messages.chat.self}</span>
-        <time className="message-time" dateTime={note.createdAt}>
-          {clockText(new Date(note.createdAt))}
-        </time>
-        <div
-          className={
-            "message-body " + (pending ? "message-pending" : "message-revealed")
-          }
-        >
-          <span
-            className="message-dots"
-            role={pending ? "status" : undefined}
-            aria-label={pending ? messages.chat.revealing : undefined}
-            aria-hidden={!pending}
-          >
-            <span aria-hidden="true" />
-            <span aria-hidden="true" />
-            <span aria-hidden="true" />
-          </span>
-          <div className="message-reveal" aria-hidden={pending || undefined}>
-            <div>
-              <p className="message-text">{note.text}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </li>
-  );
-}
 export function TodoDetail({
   todo,
   now,
   users,
+  activities,
   onUpdate,
   onMemo,
   onEdit,
@@ -589,6 +497,7 @@ export function TodoDetail({
   todo: Todo;
   now: Date;
   users: CloudUser[];
+  activities: Activity[];
   onUpdate: (patch: TodoPatch, message: string) => Promise<boolean>;
   onMemo: (body: string) => Promise<boolean>;
   onEdit: (setDeadline?: boolean) => void;
@@ -598,9 +507,7 @@ export function TodoDetail({
   const [text, setText] = useState("");
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
   const [pendingReveals, setPendingReveals] = useState(0);
-  const thread = useRef<HTMLOListElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const scrollAfterSend = useRef(true);
   const previousNotes = useRef(todo.notes.length);
   const assignee = todo.assigneeId
     ? users.find((user) => user.id === todo.assigneeId)
@@ -611,18 +518,6 @@ export function TodoDetail({
   useEffect(() => {
     onDirty(!!text.trim());
   }, [text, onDirty]);
-  useEffect(() => {
-    if (scrollAfterSend.current && thread.current) {
-      thread.current.scrollTo({
-        top: thread.current.scrollHeight,
-        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
-          .matches
-          ? "auto"
-          : "smooth",
-      });
-      scrollAfterSend.current = false;
-    }
-  }, [todo.notes]);
   useEffect(() => {
     const added = todo.notes.length - previousNotes.current;
     if (added > 0 && pendingReveals > 0) {
@@ -648,7 +543,6 @@ export function TodoDetail({
       setPendingReveals((count) => Math.max(0, count - 1));
       return;
     }
-    scrollAfterSend.current = true;
     setText("");
   }
   return (
@@ -711,24 +605,16 @@ export function TodoDetail({
       </section>
       <section className="chat" aria-labelledby="notes-heading">
         <div className="chat-heading">
-          <h3 id="notes-heading">{messages.chat.title}</h3>
-          <span>{todo.notes.length}</span>
+          <h3 id="notes-heading">{messages.activity.heading}</h3>
+          <span>{todo.notes.length + activities.length}</span>
         </div>
         <div className="chat-well">
-          <ol
-            ref={thread}
-            className="chat-thread"
-            aria-label={messages.chat.history}
-            tabIndex={todo.notes.length ? 0 : undefined}
-          >
-            {todo.notes.map((note) => (
-              <ChatMessage
-                key={note.id}
-                note={note}
-                enter={sentIds.has(note.id)}
-              />
-            ))}
-          </ol>
+          <Timeline
+            activities={activities}
+            memos={todo.notes}
+            users={users}
+            revealingIds={sentIds}
+          />
           <form className="chat-composer" onSubmit={post}>
             <label htmlFor="new-note" className="sr-only">
               {messages.chat.input}
