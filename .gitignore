@@ -4,3 +4,6 @@ dist/
 *.tsbuildinfo
 .vercel/
 artifacts/
+AGENTS.md
+.env.local
+.env*.local
