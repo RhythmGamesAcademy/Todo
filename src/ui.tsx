@@ -1,5 +1,5 @@
 import { messages } from "./messages";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   AlertCircle,
@@ -28,7 +28,7 @@ import {
 } from "./model";
 import type { Priority, Status, Todo, TodoDraft } from "./model";
 import type { Activity, CloudUser, TodoPatch } from "./cloud/types";
-import { Timeline } from "./screens/Timeline";
+import { computeEntries, Timeline } from "./screens/Timeline";
 export function Mark() {
   return (
     <img
@@ -509,6 +509,10 @@ export function TodoDetail({
   const [pendingReveals, setPendingReveals] = useState(0);
   const composer = useRef<HTMLTextAreaElement>(null);
   const previousNotes = useRef(todo.notes.length);
+  const timelineCount = useMemo(
+    () => computeEntries(activities, todo.notes, users).length,
+    [activities, todo.notes, users],
+  );
   const assignee = todo.assigneeId
     ? users.find((user) => user.id === todo.assigneeId)
     : undefined;
@@ -606,7 +610,7 @@ export function TodoDetail({
       <section className="chat" aria-labelledby="notes-heading">
         <div className="chat-heading">
           <h3 id="notes-heading">{messages.activity.heading}</h3>
-          <span>{todo.notes.length + activities.length}</span>
+          <span>{timelineCount}</span>
         </div>
         <div className="chat-well">
           <Timeline

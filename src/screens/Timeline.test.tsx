@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { Timeline } from "./Timeline";
+import { computeEntries, Timeline } from "./Timeline";
+import { messages } from "../messages";
 import type { Note } from "../model";
 import type { Activity, CloudUser } from "../cloud/types";
 
@@ -59,6 +60,9 @@ describe("タイムライン", () => {
     const items = screen
       .getAllByRole("listitem")
       .map((item) => item.textContent ?? "");
+    expect(
+      screen.getByRole("list", { name: messages.activity.heading }),
+    ).toBeTruthy();
     expect(items).toHaveLength(4);
     expect(items[0]).toContain("最初のメモ");
     expect(items[1]).toContain("田中がTODOを作成しました");
@@ -203,5 +207,26 @@ describe("タイムライン", () => {
         "田中が期限を2026年10月30日 10:00から期限なしに変更しました",
       ),
     ).toBeTruthy();
+  });
+
+  it("表示できない履歴を除いた件数を数え、リストは変更履歴として読み上げる", () => {
+    const rows = [
+      activity({
+        id: "valid",
+        kind: "todo.created",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      }),
+      activity({ id: "unknown-field", field: "mystery" }),
+      activity({ id: "empty-field", field: null }),
+      activity({ id: "renamed", kind: "user.renamed" }),
+    ];
+    const memos = [memo("m1", "メモ", "2026-10-01T00:00:00.000Z")];
+    const entries = computeEntries(rows, memos, users);
+    expect(entries).toHaveLength(2);
+    renderTimeline(rows, memos);
+    expect(
+      screen.getByRole("list", { name: messages.activity.heading }),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(entries.length);
   });
 });

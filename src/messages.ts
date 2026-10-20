@@ -9,6 +9,15 @@ const statusLabels = { todo: "未着手", doing: "進行中", done: "完了" };
 const priorityLabels = { high: "高", medium: "中", low: "低" };
 const noDeadlineLabel = "期限なし";
 const assigneeNoneLabel = "担当者なし";
+const formatDeadline = (date: Date, withYear: boolean) =>
+  (withYear ? date.getFullYear() + "年" : "") +
+  (date.getMonth() + 1) +
+  "月" +
+  date.getDate() +
+  "日 " +
+  pad(date.getHours()) +
+  ":" +
+  pad(date.getMinutes());
 const timelineFieldLabels: Record<string, string> = {
   title: "タイトル",
   description: "説明",
@@ -20,17 +29,7 @@ const timelineFieldLabels: Record<string, string> = {
 function timelineDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return (
-    date.getFullYear() +
-    "年" +
-    (date.getMonth() + 1) +
-    "月" +
-    date.getDate() +
-    "日 " +
-    pad(date.getHours()) +
-    ":" +
-    pad(date.getMinutes())
-  );
+  return formatDeadline(date, true);
 }
 function timelineValue(field: string, value: string | null) {
   switch (field) {
@@ -389,14 +388,6 @@ export const messages = {
       "分" +
       pad(d.getSeconds()) +
       "秒",
-    deadline: (d: Date, withYear: boolean) =>
-      (withYear ? d.getFullYear() + "年" : "") +
-      (d.getMonth() + 1) +
-      "月" +
-      d.getDate() +
-      "日 " +
-      pad(d.getHours()) +
-      ":" +
-      pad(d.getMinutes()),
+    deadline: (d: Date, withYear: boolean) => formatDeadline(d, withYear),
   },
 } as const;

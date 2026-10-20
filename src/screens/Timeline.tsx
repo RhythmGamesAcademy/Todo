@@ -19,6 +19,53 @@ type Entry =
   | { type: "memo"; id: string; at: string; note: Note }
   | { type: "activity"; id: string; at: string; text: string };
 
+/**
+ * メモと変更履歴を createdAt 昇順でマージする。
+ * 表示できない activity(未知の kind/field など)はここで除外するため、
+ * 呼び出し側は length をそのまま表示件数として使える。
+ */
+export function computeEntries(
+  activities: Activity[],
+  memos: Note[],
+  users: CloudUser[],
+): Entry[] {
+  const names = new Map(users.map((user) => [user.id, user.name]));
+  const rows: Entry[] = [
+    ...memos.map((note) => ({
+      type: "memo" as const,
+      id: note.id,
+      at: note.createdAt,
+      note,
+    })),
+    ...activities.flatMap((activity) => {
+      const text = messages.activity.line(
+        activity.userId ? (names.get(activity.userId) ?? null) : null,
+        activity.kind,
+        activity.field,
+        activity.before,
+        activity.after,
+      );
+      return text
+        ? [
+            {
+              type: "activity" as const,
+              id: activity.id,
+              at: activity.createdAt,
+              text,
+            },
+          ]
+        : [];
+    }),
+  ];
+  return rows.sort((a, b) => {
+    const byTime = a.at.localeCompare(b.at);
+    if (byTime !== 0) return byTime;
+    // 同じ時刻ならメモを先に置き、時系列の流れを読みやすくする。
+    if (a.type === b.type) return 0;
+    return a.type === "memo" ? -1 : 1;
+  });
+}
+
 function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
   const [pending, setPending] = useState(enter);
   const row = useRef<HTMLLIElement>(null);
@@ -120,43 +167,10 @@ export function Timeline({
   revealingIds,
 }: TimelineProps) {
   const thread = useRef<HTMLOListElement>(null);
-  const entries = useMemo(() => {
-    const names = new Map(users.map((user) => [user.id, user.name]));
-    const rows: Entry[] = [
-      ...memos.map((note) => ({
-        type: "memo" as const,
-        id: note.id,
-        at: note.createdAt,
-        note,
-      })),
-      ...activities.flatMap((activity) => {
-        const text = messages.activity.line(
-          activity.userId ? (names.get(activity.userId) ?? null) : null,
-          activity.kind,
-          activity.field,
-          activity.before,
-          activity.after,
-        );
-        return text
-          ? [
-              {
-                type: "activity" as const,
-                id: activity.id,
-                at: activity.createdAt,
-                text,
-              },
-            ]
-          : [];
-      }),
-    ];
-    return rows.sort((a, b) => {
-      const byTime = a.at.localeCompare(b.at);
-      if (byTime !== 0) return byTime;
-      // 同じ時刻ならメモを先に置き、時系列の流れを読みやすくする。
-      if (a.type === b.type) return 0;
-      return a.type === "memo" ? -1 : 1;
-    });
-  }, [activities, memos, users]);
+  const entries = useMemo(
+    () => computeEntries(activities, memos, users),
+    [activities, memos, users],
+  );
   const count = entries.length;
   const previousCount = useRef(count);
   useEffect(() => {
@@ -175,7 +189,7 @@ export function Timeline({
     <ol
       ref={thread}
       className="chat-thread timeline"
-      aria-label={messages.chat.history}
+      aria-label={messages.activity.heading}
       tabIndex={count ? 0 : undefined}
     >
       {entries.map((entry) =>

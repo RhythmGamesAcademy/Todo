@@ -323,9 +323,9 @@ describe("メモの表示演出", () => {
       vi.advanceTimersByTime(420);
     });
     expect(
-      within(screen.getByRole("list", { name: "メモの履歴" })).getByText(
-        "最初のメモ",
-      ),
+      within(
+        screen.getByRole("list", { name: messages.activity.heading }),
+      ).getByText("最初のメモ"),
     ).toBeTruthy();
     expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
   });
@@ -480,7 +480,9 @@ describe("利用者の操作", () => {
     await user.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    const thread = screen.getByRole("list", { name: "メモの履歴" });
+    const thread = screen.getByRole("list", {
+      name: messages.activity.heading,
+    });
     const items = within(thread).getAllByRole("listitem");
     expect(items).toHaveLength(2);
     for (let i = 0; i < items.length; i++) {
