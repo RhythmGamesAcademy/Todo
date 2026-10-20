@@ -6,7 +6,9 @@
 
 **[>トドTODOを使う](https://tzug1729.github.io/todo/)** 
 
- **[15秒の紹介動画を見る](docs/todo_promo_15s.mp4)**
+https://github.com/user-attachments/assets/58c53509-5ddf-4be2-b3c6-3a0e3a9a4a5e
+
+
 
 ブラウザーだけで利用でき、このアプリのアカウント登録は不要です。TODOとメモは、利用している端末・ブラウザーのlocalStorageに保存します。
 
