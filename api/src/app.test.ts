@@ -337,4 +337,329 @@ describeDb("共有リストAPI", () => {
       ).status,
     ).toBe(404);
   });
+
+  it("リスト名のPATCHはタイトルと履歴を更新し、revision を進める", async () => {
+    const before = await getState();
+    const res = await app.request(`/api/lists/${token}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "改名チーム", userId: creatorId }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { revision: number };
+    expect(body.revision).toBeGreaterThan(before.list.revision);
+
+    const state = await getState();
+    expect(state.list.title).toBe("改名チーム");
+    expect(state.list.revision).toBe(body.revision);
+    const activity = state.activities.find(
+      (item: { kind: string }) => item.kind === "list.renamed",
+    );
+    expect(activity).toMatchObject({
+      todoId: null,
+      userId: creatorId,
+      field: "title",
+      before: "チームTODO",
+      after: "改名チーム",
+    });
+
+    const invalid = await app.request(`/api/lists/${token}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "  " }),
+    });
+    expect(invalid.status).toBe(400);
+    expect((await getState()).list.title).toBe("改名チーム");
+  });
+
+  it("メンバー名のPATCHは履歴を残し、同名の別メンバーは409", async () => {
+    const join = async (name: string) => {
+      const res = await app.request(`/api/lists/${token}/join`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      expect(res.status).toBe(200);
+      return (await res.json()) as { userId: string; name: string };
+    };
+    const mio = await join("みお");
+    const sora = await join("そら");
+
+    const conflict = await app.request(
+      `/api/lists/${token}/users/${mio.userId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "そら", userId: creatorId }),
+      },
+    );
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ error: expect.any(String) });
+    expect(
+      (await getState()).users.find(
+        (user: { id: string }) => user.id === mio.userId,
+      ).name,
+    ).toBe("みお");
+
+    const res = await app.request(`/api/lists/${token}/users/${mio.userId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "みおこ", userId: creatorId }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ userId: mio.userId, name: "みおこ" });
+
+    const state = await getState();
+    expect(
+      state.users.find((user: { id: string }) => user.id === mio.userId).name,
+    ).toBe("みおこ");
+    expect(
+      state.users.find((user: { id: string }) => user.id === sora.userId).name,
+    ).toBe("そら");
+    const activity = state.activities.find(
+      (item: { kind: string; after: string | null }) =>
+        item.kind === "user.renamed" && item.after === "みおこ",
+    );
+    expect(activity).toMatchObject({
+      todoId: null,
+      userId: creatorId,
+      field: "name",
+      before: "みお",
+      after: "みおこ",
+    });
+  });
+
+  it("メンバー削除は担当TODOを未割当にし、履歴とメモのuserIdをNULLで残す", async () => {
+    const joined = await app.request(`/api/lists/${token}/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "ゆい" }),
+    });
+    const yui = (await joined.json()) as { userId: string };
+
+    const created = await postTodo({
+      title: "ゆいの担当",
+      status: "todo",
+      priority: "low",
+      assigneeId: yui.userId,
+      userId: creatorId,
+    });
+    expect(created.status).toBe(201);
+    const todo = (await created.json()) as { id: string };
+
+    const memoRes = await app.request(
+      `/api/lists/${token}/todos/${todo.id}/memos`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body: "ゆいのメモ", userId: yui.userId }),
+      },
+    );
+    const memo = (await memoRes.json()) as { id: string };
+
+    const res = await app.request(`/api/lists/${token}/users/${yui.userId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: yui.userId }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({});
+
+    const state = await getState();
+    expect(() => parseCloudState(state)).not.toThrow();
+    expect(
+      state.users.find((user: { id: string }) => user.id === yui.userId),
+    ).toBeUndefined();
+    expect(
+      state.todos.find((item: { id: string }) => item.id === todo.id),
+    ).toMatchObject({ assigneeId: null });
+    expect(
+      state.activities.find(
+        (item: { kind: string; before: string | null }) =>
+          item.kind === "user.removed" && item.before === "ゆい",
+      ),
+    ).toMatchObject({
+      todoId: null,
+      userId: null,
+      field: null,
+      before: "ゆい",
+      after: null,
+    });
+
+    const [memoRow] = (
+      await db.sql`SELECT user_id FROM memos WHERE id = ${memo.id}`
+    ).rows;
+    expect(memoRow.user_id).toBeNull();
+
+    expect(
+      (
+        await app.request(`/api/lists/${token}/users/${yui.userId}`, {
+          method: "DELETE",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/users/${yui.userId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "ゆい2" }),
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("他のリストのメンバーやUUIDでないIDは404", async () => {
+    const other = await app.request("/api/lists", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "別チーム", name: "べつ" }),
+    });
+    const otherToken = ((await other.json()) as { token: string }).token;
+    const otherState = await (
+      await app.request(`/api/lists/${otherToken}`)
+    ).json();
+    const outsiderId = otherState.users[0].id as string;
+
+    expect(
+      (
+        await app.request(`/api/lists/${token}/users/${outsiderId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "のっとり" }),
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/users/${outsiderId}`, {
+          method: "DELETE",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/users/not-a-uuid`, {
+          method: "DELETE",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await app.request("/api/lists/unknown", { method: "DELETE" })).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request("/api/lists/unknown", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "なし" }),
+        })
+      ).status,
+    ).toBe(404);
+  });
+});
+
+// リスト削除はデータを消すため、最後に独立したブロックで実行する。
+describeDb("共有リストの削除", () => {
+  const db = makeDb(databaseUrl ?? "");
+  const app = createApp(db);
+
+  beforeAll(async () => {
+    await db.sql`DELETE FROM lists`;
+  });
+
+  it("リスト削除は配下を物理削除し、以降の全ルートが404になる", async () => {
+    const created = await app.request("/api/lists", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "消えるチーム", name: "さくら" }),
+    });
+    expect(created.status).toBe(201);
+    const { token } = (await created.json()) as { token: string };
+    const state = await (await app.request(`/api/lists/${token}`)).json();
+    const listId = state.list.id as string;
+    const userId = state.users[0].id as string;
+
+    const todoRes = await app.request(`/api/lists/${token}/todos`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "消えるTODO",
+        status: "todo",
+        priority: "medium",
+        assigneeId: userId,
+        userId,
+      }),
+    });
+    expect(todoRes.status).toBe(201);
+    const todoId = ((await todoRes.json()) as { id: string }).id;
+
+    const deleted = await app.request(`/api/lists/${token}`, {
+      method: "DELETE",
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({});
+
+    expect((await app.request(`/api/lists/${token}`)).status).toBe(404);
+    expect((await app.request(`/api/lists/${token}/revision`)).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await app.request(`/api/lists/${token}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "もうない" }),
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/join`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "あとから" }),
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/todos`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            title: "作れない",
+            status: "todo",
+            priority: "low",
+          }),
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/todos/${todoId}`, {
+          method: "DELETE",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await app.request(`/api/lists/${token}/users/${userId}`, {
+          method: "DELETE",
+        })
+      ).status,
+    ).toBe(404);
+
+    const [counts] = (
+      await db.sql`
+        SELECT
+          (SELECT count(*) FROM todos WHERE list_id = ${listId}) AS todos,
+          (SELECT count(*) FROM users WHERE list_id = ${listId}) AS users,
+          (SELECT count(*) FROM activities WHERE list_id = ${listId}) AS activities
+      `
+    ).rows;
+    expect(Number(counts.todos)).toBe(0);
+    expect(Number(counts.users)).toBe(0);
+    expect(Number(counts.activities)).toBe(0);
+  });
 });

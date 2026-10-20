@@ -96,6 +96,9 @@ const STATUSES: readonly Status[] = ["todo", "doing", "done"];
 const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+// UUID 以外の文字列を uuid 列と比較すると Postgres が 22P02 で落ちるため、
+// 構文だけ先に確認して「存在しない ID」= 404 に寄せる。
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const parseEnum = <T extends string>(
   value: unknown,
@@ -178,6 +181,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     listId: string,
     userId: string,
   ): Promise<UserRefRow | null> => {
+    if (!UUID.test(userId)) return null;
     const [user] = rowsOf<UserRefRow>(
       await sql`SELECT id, name FROM users WHERE list_id = ${listId} AND id = ${userId}`,
     );
@@ -217,6 +221,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     listId: string,
     id: string,
   ): Promise<TodoRecordRow | null> => {
+    if (!UUID.test(id)) return null;
     const [todo] = rowsOf<TodoRecordRow>(
       await sql`
         SELECT id, title, description, status, priority, due, assignee_id,
@@ -263,6 +268,37 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     return c.json({ token }, 201);
   });
 
+  app.patch("/api/lists/:token", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const body = await readJson(c);
+    const title = assertText(body.title, 120, "title");
+    const userId = await readOptionalUserId(body, list.id);
+
+    await transact([
+      sql`UPDATE lists SET title = ${title} WHERE id = ${list.id}`,
+      addActivity(
+        list.id,
+        null,
+        userId,
+        "list.renamed",
+        "title",
+        list.title,
+        title,
+      ),
+    ]);
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
+  app.delete("/api/lists/:token", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    // 子テーブルは FK の ON DELETE CASCADE で物理削除される。
+    // 確認 UI はクライアント側の責務なので、ここでは即時削除する。
+    await sql`DELETE FROM lists WHERE id = ${list.id}`;
+    return c.json({}, 200);
+  });
+
   app.get("/api/lists/:token/revision", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
@@ -295,6 +331,54 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     );
     if (!user) throw new Error("failed to resolve joined user");
     return c.json({ userId: user.id, name });
+  });
+
+  app.patch("/api/lists/:token/users/:id", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const user = await findUser(list.id, c.req.param("id"));
+    if (!user) return notFound(c);
+    const body = await readJson(c);
+    const name = assertText(body.name, 120, "name");
+    const userId = await readOptionalUserId(body, list.id);
+
+    if (name === user.name) return c.json({ userId: user.id, name });
+
+    const [conflict] = rowsOf<{ id: string }>(
+      await sql`SELECT id FROM users WHERE list_id = ${list.id} AND name = ${name} AND id <> ${user.id}`,
+    );
+    if (conflict) throw new ApiException(409, "name already in use");
+
+    await transact([
+      sql`UPDATE users SET name = ${name} WHERE id = ${user.id} AND list_id = ${list.id}`,
+      addActivity(
+        list.id,
+        null,
+        userId,
+        "user.renamed",
+        "name",
+        user.name,
+        name,
+      ),
+    ]);
+    return c.json({ userId: user.id, name });
+  });
+
+  app.delete("/api/lists/:token/users/:id", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const user = await findUser(list.id, c.req.param("id"));
+    if (!user) return notFound(c);
+    const body = await readOptionalJson(c);
+    const userId = await readOptionalUserId(body, list.id);
+
+    // 履歴の user_id が削除対象を指す場合、users 削除時の FK で NULL になるため
+    // activity を先に挿入する。担当 TODO の assignee_id も同じく NULL になる。
+    await transact([
+      addActivity(list.id, null, userId, "user.removed", null, user.name, null),
+      sql`DELETE FROM users WHERE id = ${user.id} AND list_id = ${list.id}`,
+    ]);
+    return c.json({}, 200);
   });
 
   app.post("/api/lists/:token/todos", async (c) => {
