@@ -25,6 +25,7 @@ const ctrl = vi.hoisted(() => {
   return {
     board: null as unknown,
     boot: { token: null as string | null, session: null as unknown },
+    sessionArg: null as unknown,
     writes: [] as unknown[],
     listeners,
     notify() {
@@ -43,7 +44,8 @@ vi.mock("./cloud/session", () => ({
 vi.mock("./cloud/useBoard", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
-    useBoard: () => {
+    useBoard: (nextSession: unknown) => {
+      ctrl.sessionArg = nextSession;
       useSyncExternalStore(
         (listener: () => void) => {
           ctrl.listeners.add(listener);
@@ -51,7 +53,7 @@ vi.mock("./cloud/useBoard", async () => {
         },
         () => ctrl.board,
       );
-      return ctrl.board;
+      return nextSession === null ? { phase: "login" } : ctrl.board;
     },
   };
 });
@@ -179,7 +181,12 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
                 ...todo,
                 notes: [
                   ...todo.notes,
-                  { id: "memo-" + sequence, text: body, createdAt: timestamp },
+                  {
+                    id: "memo-" + sequence,
+                    text: body,
+                    createdAt: timestamp,
+                    userId: session.userId,
+                  },
                 ],
                 updatedAt: timestamp,
               }
@@ -241,6 +248,7 @@ describe("一覧の表示形式", () => {
             id: "memo",
             text: "一覧には不要な進捗メモ",
             createdAt: "2026-10-18T00:00:00.000Z",
+            userId: "me",
           },
         ],
       }),
@@ -609,6 +617,7 @@ describe("利用者の操作", () => {
             id: "note",
             text: "残すメモ",
             createdAt: "2026-10-18T00:00:00.000Z",
+            userId: "me",
           },
         ],
       }),
@@ -819,6 +828,13 @@ describe("接続状態", () => {
       name: "参加者",
     });
     expect(screen.getByTestId("prefill").textContent).toBe("none");
+  });
+  it("別リストの招待トークンはログイン中でも参加画面を開く", () => {
+    ctrl.boot = { token: "t-other", session };
+    render(<App />);
+    expect(screen.getByRole("heading", { name: "ログイン画面" })).toBeTruthy();
+    expect(screen.getByTestId("prefill").textContent).toBe("t-other");
+    expect(ctrl.sessionArg).toBeNull();
   });
   it("読み込み中は待機表示を出す", () => {
     setBoard({ phase: "loading" });

@@ -116,6 +116,7 @@ export function LoginScreen({ prefillToken, onJoined }: LoginScreenProps) {
             id="login-token"
             className="field"
             value={token}
+            maxLength={120}
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => {
@@ -130,6 +131,7 @@ export function LoginScreen({ prefillToken, onJoined }: LoginScreenProps) {
             id="login-name"
             className="field"
             value={joinName}
+            maxLength={120}
             autoComplete="nickname"
             onChange={(event) => {
               setJoinName(event.target.value);
@@ -165,6 +167,7 @@ export function LoginScreen({ prefillToken, onJoined }: LoginScreenProps) {
             id="login-list-title"
             className="field"
             value={listTitle}
+            maxLength={120}
             onChange={(event) => {
               setListTitle(event.target.value);
               setError("");
@@ -177,6 +180,7 @@ export function LoginScreen({ prefillToken, onJoined }: LoginScreenProps) {
             id="login-create-name"
             className="field"
             value={createName}
+            maxLength={120}
             autoComplete="nickname"
             onChange={(event) => {
               setCreateName(event.target.value);

@@ -56,8 +56,12 @@ export default function App() {
   const bootRef = useRef<ReturnType<typeof resolveSession> | null>(null);
   if (bootRef.current === null) bootRef.current = resolveSession();
   const boot = bootRef.current;
+  // 別リストの招待URLを開いた場合は、保存済みセッションをいったん使わず
+  // 参加画面を開く。参加が完了するまでそのリストのセッションにはしない。
+  const bootSession =
+    boot.token && boot.token !== boot.session?.token ? null : boot.session;
   const [currentSession, setCurrentSession] = useState<Session | null>(
-    boot.session,
+    bootSession,
   );
   const [prefillToken, setPrefillToken] = useState<string | null>(boot.token);
   const onSessionLost = useCallback(() => {
