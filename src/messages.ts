@@ -243,7 +243,7 @@ export const messages = {
     copyShare: "共有URLをコピー",
     copied: "共有URLをコピーしました",
     dataTitle: "データ",
-    dataExport: "データの書き出し・復元",
+    dataExport: "データの書き出し",
   },
   login: {
     heading: "共有TODOへ参加",
