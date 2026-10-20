@@ -6,9 +6,7 @@
 
 **[>トドTODOを使う](https://tzug1729.github.io/todo/)** 
 
-https://github.com/user-attachments/assets/58c53509-5ddf-4be2-b3c6-3a0e3a9a4a5e
-
-
+https://github.com/user-attachments/assets/d8e82c55-a8fa-4c78-b13a-db33621a0fab
 
 ブラウザーだけで利用でき、このアプリのアカウント登録は不要です。TODOとメモは、利用している端末・ブラウザーのlocalStorageに保存します。
 
@@ -16,7 +14,7 @@ https://github.com/user-attachments/assets/58c53509-5ddf-4be2-b3c6-3a0e3a9a4a5e
 
 TODOを管理するだけでは、「どこまで進めたか」「次に何をするか」が分かりにくく、完了させたときにも、もう少し達成感がほしいと感じていました。
 
-そこで、タスクごとに進捗や気づきを時系列で残せる機能と、完了を楽しめる演出を組み合わせました。、機能の多さだけでなく、PCでもスマートフォンでも迷わず操作できることを目指しました。
+そこで、タスクごとに進捗や気づきを時系列で残せる機能と、完了を楽しめる演出を組み合わせました。機能の多さだけでなく、PCでもスマートフォンでも迷わず操作できることを目指しました。
 
 ## 主な機能と使い方
 
