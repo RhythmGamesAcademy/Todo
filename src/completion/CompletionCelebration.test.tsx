@@ -215,15 +215,20 @@ describe("完了のトド演出", () => {
       document.querySelector(".sea-lion-body")?.getAttribute("d"),
     ).toContain("M16.000 55.000");
     await finishPhase(3);
-    expect(plays).toHaveLength(5);
+    expect(
+      document.querySelector(".completion-swimmer")?.getAttribute("data-stage"),
+    ).toBe("anticipate");
+    await finishPhase(4);
+    expect(plays).toHaveLength(6);
     // Counter center (295, 89), stage center (195, 422): no desktop/mobile constants.
-    expect(plays[4].frames.at(-1)?.transform).toContain(
+    expect(plays[5].frames.at(-1)?.transform).toContain(
       "translate(100px, -333px)",
     );
     expect(counter().textContent).toBe("0");
-    await finishPhase(4);
+    await finishPhase(5);
     expect(counter().textContent).toBe("1");
     expect(counter().classList.contains("nav-count-arrived")).toBe(true);
+    expect(doneMenu().querySelector(".completion-splash")).not.toBeNull();
     expect(
       screen.queryByRole("button", { name: messages.completion.skip }),
     ).toBeNull();
@@ -236,7 +241,7 @@ describe("完了のトド演出", () => {
     );
     mounted.unmount();
     render(<App />);
-    expect(plays).toHaveLength(5);
+    expect(plays).toHaveLength(6);
     expect(counter().textContent).toBe("1");
   });
   it("泳いでいる途中にメニュー位置が変わっても、画面上の新しい位置を追跡する", async () => {
@@ -249,11 +254,12 @@ describe("完了のトド演出", () => {
     await finishPhase(1);
     await finishPhase(2);
     await finishPhase(3);
+    await finishPhase(4);
     destination = rect(20, 340, 14, 18);
     act(() => vi.advanceTimersByTime(64));
-    const revised = plays[4].setKeyframes.mock.calls.at(-1)?.[0] as Keyframe[];
+    const revised = plays[5].setKeyframes.mock.calls.at(-1)?.[0] as Keyframe[];
     expect(revised.at(-1)?.transform).toContain("translate(-168px, -73px)");
-    await finishPhase(4);
+    await finishPhase(5);
     expect(counter().textContent).toBe("1");
   });
   it("Escで即時終了して件数を反映し、保存済みの完了状態を戻さない", async () => {

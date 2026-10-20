@@ -1,7 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { centerOf, swimKeyframes, turnKeyframes } from "./swimGeometry";
+import { anticipationFrames } from "./completionMotion";
 
 describe("トドの経路", () => {
+  it("溜めの終点から途切れず発進し、体を伸ばしてから目的地へ収束する", () => {
+    const origin = { x: 195, y: 422 },
+      destination = { x: 280, y: 85 };
+    const anticipation = anticipationFrames(origin, destination);
+    const swim = swimKeyframes(origin, destination);
+    const translation = (frame: Keyframe) =>
+      String(frame.transform)
+        .match(/translate\((-?[\d.e+-]+)px, (-?[\d.e+-]+)px\)/)
+        ?.slice(1)
+        .map(Number);
+    const before = translation(anticipation.at(-1)!)!;
+    const after = translation(swim[0])!;
+    expect(before[0]).toBeCloseTo(after[0]);
+    expect(before[1]).toBeCloseTo(after[1]);
+    expect(String(swim[0].transform)).toContain("scale(0.84, 1.12)");
+    const early = swim.find((frame) => frame.offset! >= 0.2)!;
+    const [, x, y] = String(early.transform).match(
+      /scale\(([-\d.e+]+), ([-\d.e+]+)\)/,
+    )!;
+    expect(Number(x)).toBeGreaterThan(Number(y));
+    expect(swim.at(-1)?.transform).toContain("translate(85px, -337px)");
+  });
   it.each([
     { width: 390, height: 844 },
     { width: 1440, height: 900 },

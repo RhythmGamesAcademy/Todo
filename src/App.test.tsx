@@ -49,6 +49,17 @@ describe("一覧の表示形式", () => {
     const original = localStorage.getItem(STORAGE_KEY);
     const user = userEvent.setup();
     const mounted = render(<App />);
+    const allIcon = () =>
+      within(screen.getByRole("navigation", { name: messages.app.navigation }))
+        .getByRole("button", { name: /^すべてのTODO/ })
+        .querySelector("svg")
+        ?.getAttribute("class");
+    const layoutIcon = (name: string) =>
+      screen
+        .getByRole("button", { name })
+        .querySelector("svg")
+        ?.getAttribute("class");
+    expect(allIcon()).toBe(layoutIcon(messages.layout.cards));
     await user.type(
       screen.getByRole("searchbox", { name: messages.search.label }),
       "授業",
@@ -60,6 +71,8 @@ describe("一覧の表示形式", () => {
     await user.click(
       screen.getByRole("button", { name: messages.layout.compact }),
     );
+    expect(allIcon()).toBe(layoutIcon(messages.layout.compact));
+    expect(allIcon()).not.toBe(layoutIcon(messages.layout.cards));
     const row = screen.getByRole("button", { name: "授業の課題の詳細を開く" });
     expect(row.classList.contains("todo-compact")).toBe(true);
     expect(within(row).getByText("TODOアプリを作る")).toBeTruthy();
@@ -83,6 +96,7 @@ describe("一覧の表示形式", () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe(original);
     mounted.unmount();
     render(<App />);
+    expect(allIcon()).toBe(layoutIcon(messages.layout.compact));
     expect(
       screen
         .getByRole("button", { name: messages.layout.compact })
@@ -91,6 +105,7 @@ describe("一覧の表示形式", () => {
     await user.click(
       screen.getByRole("button", { name: messages.layout.cards }),
     );
+    expect(allIcon()).toBe(layoutIcon(messages.layout.cards));
     expect(screen.getByText("一覧には不要な進捗メモ")).toBeTruthy();
   });
 });
@@ -504,7 +519,7 @@ describe("利用者の操作", () => {
 });
 
 describe("期限超過メニュー", () => {
-  it("すべてのTODOと未完了の間に表示し、件数と表示対象を未完了の期限超過に絞る", async () => {
+  it("すべてのTODO・未完了・期限超過の順に表示し、件数と表示対象を未完了の期限超過に絞る", async () => {
     const past = new Date(Date.now() - 60000).toISOString();
     const future = new Date(Date.now() + 3600000).toISOString();
     localStorage.setItem(
@@ -526,10 +541,22 @@ describe("期限超過メニュー", () => {
     render(<App />);
     const nav = within(screen.getByRole("navigation", { name: "TODOの表示" }));
     const buttons = nav.getAllByRole("button");
+    const unfinishedIcon = nav
+      .getByRole("button", { name: /^未完了/ })
+      .querySelector("svg")
+      ?.getAttribute("class");
+    for (const name of [/^進行中/, /^完了/]) {
+      expect(unfinishedIcon).not.toBe(
+        nav
+          .getByRole("button", { name })
+          .querySelector("svg")
+          ?.getAttribute("class"),
+      );
+    }
     expect(buttons.slice(0, 3).map((b) => b.textContent)).toEqual([
       "すべてのTODO4",
-      "期限超過1",
       "未完了3",
+      "期限超過1",
     ]);
     await user.click(nav.getByRole("button", { name: /^期限超過/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(

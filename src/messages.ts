@@ -24,16 +24,16 @@ export const messages = {
   filters: {
     heading: {
       all: "すべてのTODO",
-      overdue: "期限超過",
       active: "未完了",
+      overdue: "期限超過",
       today: "今日が期限",
       doing: "進行中",
       done: "完了したTODO",
     },
     navigation: {
       all: "すべてのTODO",
-      overdue: "期限超過",
       active: "未完了",
+      overdue: "期限超過",
       today: "今日が期限",
       doing: "進行中",
       done: "完了",
@@ -52,15 +52,15 @@ export const messages = {
   layout: {
     label: "一覧の表示形式",
     cards: "カード",
-    compact: "簡潔",
+    compact: "リスト",
   },
   completion: {
     announced: (title: string) => "「" + title + "」を完了に移動しました",
     skip: "演出をスキップ",
     title: "タスクが完了しました",
-    allDone: "🎉 素晴らしい！すべて消化できました",
-    oneLeft: "🔥 残るは1個です！",
-    keepGoing: "🌊 この調子で頑張りましょう",
+    allDone: "素晴らしい！すべて消化できました🎉",
+    oneLeft: "残るは1個です🔥",
+    keepGoing: "この調子で頑張りましょう🌊",
   },
   todo: {
     create: "新しいTODO",

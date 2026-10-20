@@ -2,7 +2,7 @@ import { messages } from "./messages";
 import { useEffect, useState } from "react";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
-type TodoLayout = "cards" | "compact";
+export type TodoLayout = "cards" | "compact";
 const LAYOUT_KEY = "todo:layout";
 export function useTodoLayout() {
   const [layout, setLayout] = useState<TodoLayout>(() => {

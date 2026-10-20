@@ -5,6 +5,7 @@
   pointer-events: none;
   display: grid;
   place-items: center;
+  overflow: clip;
 }
 .completion-shade {
   position: absolute;
@@ -24,6 +25,13 @@
   background: transparent;
   color: #263f60;
   overflow: hidden;
+}
+[data-stage="morph"] .completion-paper {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--paper-width);
+  transform: translate(-50%, -50%);
 }
 .completion-seal {
   display: inline-flex;
@@ -81,6 +89,7 @@
   gap: 6px;
 }
 .completion-swimmer {
+  --stroke-duration: 410ms;
   position: absolute;
   top: 50%;
   left: 50%;
@@ -88,6 +97,12 @@
   transform: translate(-50%, -50%);
   opacity: 0;
   filter: drop-shadow(0 15px 25px rgb(32 73 127 / 20%));
+}
+[data-stage="anticipate"] {
+  --stroke-duration: 270ms;
+}
+[data-stage="swim"] {
+  --stroke-duration: 190ms;
 }
 .completion-creature {
   position: absolute;
@@ -110,10 +125,8 @@
 [data-stage="morph"] .sea-lion-face-and-fin {
   animation: sea-lion-form var(--morph-duration) linear both;
 }
-[data-stage="turn"] .sea-lion-features,
-[data-stage="turn"] .sea-lion-face-and-fin,
-[data-stage="swim"] .sea-lion-features,
-[data-stage="swim"] .sea-lion-face-and-fin {
+:is([data-stage="turn"], [data-stage="anticipate"], [data-stage="swim"])
+  :is(.sea-lion-features, .sea-lion-face-and-fin) {
   opacity: 1;
 }
 .sea-lion-far-fin {
@@ -133,14 +146,42 @@
 .sea-lion-tail {
   transform-origin: 16% 61%;
 }
-:is([data-stage="turn"], [data-stage="swim"]) .sea-lion-near-fin {
-  animation: sea-lion-front-stroke 520ms ease-in-out infinite;
+:is([data-stage="turn"], [data-stage="anticipate"], [data-stage="swim"])
+  .sea-lion-near-fin {
+  animation: sea-lion-front-stroke var(--stroke-duration) ease-in-out infinite;
 }
-:is([data-stage="turn"], [data-stage="swim"]) .sea-lion-far-fin {
-  animation: sea-lion-back-stroke 520ms ease-in-out -260ms infinite;
+:is([data-stage="turn"], [data-stage="anticipate"], [data-stage="swim"])
+  .sea-lion-far-fin {
+  animation: sea-lion-back-stroke var(--stroke-duration) ease-in-out
+    calc(var(--stroke-duration) * -0.5) infinite;
 }
-:is([data-stage="turn"], [data-stage="swim"]) .sea-lion-tail {
-  animation: sea-lion-tail-stroke 520ms ease-in-out infinite;
+:is([data-stage="turn"], [data-stage="anticipate"], [data-stage="swim"])
+  .sea-lion-tail {
+  animation: sea-lion-tail-stroke var(--stroke-duration) ease-in-out infinite;
+}
+.sea-lion-wake {
+  opacity: 0;
+  stroke: #639cde;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  transform-origin: 15% 60%;
+}
+[data-stage="turn"] .sea-lion-wake {
+  opacity: 0.3;
+  animation: sea-lion-wake 410ms ease-out infinite;
+}
+[data-stage="swim"] .sea-lion-wake {
+  opacity: 0.8;
+  animation: sea-lion-wake 190ms ease-out infinite;
+}
+@keyframes sea-lion-wake {
+  from {
+    transform: translateX(8px) scaleX(0.7);
+  }
+  to {
+    transform: translateX(-12px) scaleX(1.2);
+    opacity: 0.15;
+  }
 }
 .sea-lion-cheek,
 .sea-lion-whisker {
@@ -165,10 +206,10 @@
 @keyframes sea-lion-front-stroke {
   0%,
   100% {
-    transform: rotate(-16deg) scaleY(0.9);
+    transform: rotate(-24deg) scaleY(0.86);
   }
   46% {
-    transform: rotate(24deg) scaleY(1.06);
+    transform: rotate(32deg) scaleY(1.08);
   }
 }
 @keyframes sea-lion-back-stroke {
@@ -209,11 +250,68 @@
 .completion-skip:hover {
   background: #edf4ff;
 }
-.nav-count-arrived {
+.nav-counter-anchor .nav-count-arrived {
   animation: completion-count-bounce 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
   color: #1767d7;
   font-weight: 750;
   display: inline-block;
+}
+.nav-counter-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+.nav-item .completion-splash {
+  position: absolute;
+  width: 92px;
+  height: 92px;
+  max-width: none;
+  pointer-events: none;
+  overflow: visible;
+  color: #2479e8;
+}
+@media (max-width: 760px) {
+  .nav-item .completion-splash {
+    width: 64px;
+    height: 64px;
+  }
+}
+.completion-splash-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  transform-origin: center;
+  animation: completion-ring 620ms ease-out both;
+}
+.completion-splash-drop {
+  fill: currentColor;
+  transform-origin: center;
+  animation: completion-droplets 620ms cubic-bezier(0.1, 0.7, 0.2, 1) both;
+}
+@keyframes completion-ring {
+  from {
+    transform: scale(0.3);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(2.25);
+    opacity: 0;
+  }
+}
+@keyframes completion-droplets {
+  0% {
+    transform: translateY(20px) scale(0.3);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(-10px) scale(0.65);
+    opacity: 0;
+  }
 }
 @keyframes completion-count-bounce {
   0% {

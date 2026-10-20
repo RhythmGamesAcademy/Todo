@@ -7,8 +7,6 @@ import {
   Check,
   ChevronRight,
   HardDrive,
-  LayoutGrid,
-  List,
   LockKeyhole,
   Plus,
   Search,
@@ -27,6 +25,7 @@ import { DataPanel } from "./DataPanel";
 import { Mark, Modal, TodoCard, TodoDetail, TodoForm } from "./ui";
 import type { AskOptions } from "./ui";
 import { TodoNavigation } from "./components/TodoNavigation";
+import { TodoLayoutIcon } from "./components/TodoLayoutIcon";
 import { CompletionCelebration } from "./completion/CompletionCelebration";
 import { useCompletionQueue } from "./completion/useCompletionQueue";
 import { CompletionNotice } from "./completion/CompletionNotice";
@@ -235,6 +234,7 @@ export default function App() {
       <aside className="sidebar">
         <TodoNavigation
           filter={filter}
+          layout={layout}
           counts={{ ...counts, done: completion.displayedCount }}
           onSelect={(key) => {
             setFilter(key);
@@ -341,7 +341,7 @@ export default function App() {
                     aria-pressed={layout === "cards"}
                     onClick={() => changeLayout("cards")}
                   >
-                    <LayoutGrid size={16} />
+                    <TodoLayoutIcon layout="cards" size={16} />
                     {messages.layout.cards}
                   </button>
                   <button
@@ -349,7 +349,7 @@ export default function App() {
                     aria-pressed={layout === "compact"}
                     onClick={() => changeLayout("compact")}
                   >
-                    <List size={17} />
+                    <TodoLayoutIcon layout="compact" size={17} />
                     {messages.layout.compact}
                   </button>
                 </div>

@@ -3,9 +3,11 @@ import type { RefObject } from "react";
 export function SeaLion({
   body,
   features,
+  face,
 }: {
   body: RefObject<SVGPathElement | null>;
   features: RefObject<SVGGElement | null>;
+  face: RefObject<SVGGElement | null>;
 }) {
   return (
     <svg
@@ -15,6 +17,11 @@ export function SeaLion({
       aria-hidden="true"
     >
       <g className="sea-lion-features" ref={features}>
+        <g className="sea-lion-wake" fill="none">
+          <path d="M-8 47H-33M-10 59H-45M-8 71H-30" />
+          <circle cx="-18" cy="40" r="3" />
+          <circle cx="-34" cy="75" r="2" />
+        </g>
         <path
           className="sea-lion-far-fin"
           d="M111 49C124 51 135 63 137 72C129 74 115 65 106 56Z"
@@ -25,7 +32,7 @@ export function SeaLion({
         />
       </g>
       <path className="sea-lion-body" ref={body} />
-      <g className="sea-lion-face-and-fin">
+      <g className="sea-lion-face-and-fin" ref={face}>
         <path
           className="sea-lion-near-fin"
           d="M104 55C99 66 83 82 66 87C60 89 59 85 64 80L94 54Z"
