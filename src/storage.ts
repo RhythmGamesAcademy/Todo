@@ -56,7 +56,8 @@ export function useTodoStore() {
   function save(todos: Todo[], recover = false) {
     if (stored.recovery && !recover) return false;
     try {
-      localStorage.setItem(STORAGE_KEY, serializeTodos(todos));
+      if (todos.length === 0) localStorage.removeItem(STORAGE_KEY);
+      else localStorage.setItem(STORAGE_KEY, serializeTodos(todos));
       setStored({ todos, recovery: null, error: null });
       return true;
     } catch {

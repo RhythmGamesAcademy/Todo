@@ -544,7 +544,7 @@ describe("利用者の操作", () => {
         name: "TODOを削除",
       }),
     );
-    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)).toHaveLength(0);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     await user.click(screen.getByRole("button", { name: "元に戻す" }));
     expect(
       parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes[0].text,

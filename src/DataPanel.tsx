@@ -51,7 +51,10 @@ export function DataPanel({
     (todo) => bulkScope === "all" || todo.status === "done",
   );
   const storageBytes = useMemo(
-    () => ((recovery ?? serializeTodos(todos)).length + STORAGE_KEY.length) * 2,
+    () =>
+      recovery === null && todos.length === 0
+        ? 0
+        : ((recovery ?? serializeTodos(todos)).length + STORAGE_KEY.length) * 2,
     [todos, recovery],
   );
   const changed = preview.plan
