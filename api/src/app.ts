@@ -15,8 +15,8 @@ import {
   assertText,
   computeActivities,
   generateToken,
-} from "./domain";
-import type { Sql, SqlCall, Transact } from "./sql";
+} from "./domain.js";
+import type { Sql, SqlCall, Transact } from "./sql.js";
 
 export interface AppDeps {
   sql: Sql;

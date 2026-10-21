@@ -1,6 +1,6 @@
 import { handle } from "hono/vercel";
-import { createApp } from "./src/app";
-import { makeDb } from "./src/sql";
+import { createApp } from "./src/app.js";
+import { makeDb } from "./src/sql.js";
 
 const app = createApp(makeDb(process.env.DATABASE_URL!));
 

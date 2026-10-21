@@ -1,8 +1,8 @@
 // ローカル開発用。API を Vercel 関数ではなく Node プロセスとして起動する。
 // `npm run dev:api` から実行し、画面側は Vite の /api プロキシで接続する。
 import { serve } from "@hono/node-server";
-import { createApp } from "./src/app";
-import { makeDb } from "./src/sql";
+import { createApp } from "./src/app.js";
+import { makeDb } from "./src/sql.js";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
