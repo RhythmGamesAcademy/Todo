@@ -11,7 +11,11 @@ npm ci
 npm run dev
 ```
 
-`npm run dev` はフロントエンド（Vite）だけを起動します。画面と `/api` をまとめてローカルで動かす場合は `vercel dev` を使用してください。APIを別プロセスで動かす場合は、`VITE_API_URL` にそのURLを設定すると、Viteが `/api` をプロキシします（未設定時は `http://127.0.0.1:3000`）。
+`npm run dev` はフロントエンド（Vite）だけを起動します。画面と `/api` をまとめてローカルで動かす場合は `vercel dev` を使用してください。APIだけを別プロセスで動かす場合は `npm run dev:api`（`.env.local` の `DATABASE_URL` を読む）を先に起動しておくと、Viteが `/api` を `http://127.0.0.1:3000` へプロキシします（`VITE_API_URL` で転送先を変更できます）。
+
+初回は `.env.local`（Git管理外）に `DATABASE_URL` として Neon devブランチの接続文字列 `postgres://...` を1行で記載し、`psql "$DATABASE_URL" -f db/schema.sql` でスキーマを適用してから起動します。
+
+注意: `npm install` や `npm ci` は実行した側のOS向け（WSLならLinux、PowerShellならWindows）のネイティブ依存（rollup・esbuild）だけを node_modules に残すため、WSLとPowerShellを行き来していたずらに実行すると、もう片方でビルドやテストが落ちます。途中で切り替えた場合は切り替えた側で `npm ci` を実行し直してください。
 
 ```sh
 npm test
@@ -148,6 +152,7 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 ### サーバーとデータベース
 
 - api/index.ts: Vercel向けHonoエントリ（`DATABASE_URL` でNeonへ接続）
+- api/dev.ts: ローカル開発用のAPI起動（`npm run dev:api` で `@hono/node-server` により3000番ポートで待ち受ける）
 - api/src/app.ts / app.test.ts: リスト・メンバー・TODO・メモ・履歴のHTTPルート
 - api/src/domain.ts / domain.test.ts: 入力検証、トークン生成、履歴の差分計算
 - api/src/sql.ts: Neonクライアントとトランザクションのアダプター
