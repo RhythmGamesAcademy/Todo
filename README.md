@@ -6,7 +6,9 @@
 
 **[>トドTODOを使う](https://tzug1729.github.io/todo/)** 
 
-https://github.com/user-attachments/assets/d8e82c55-a8fa-4c78-b13a-db33621a0fab
+リンク：```https://tzug1729.github.io/todo/```
+
+https://github.com/user-attachments/assets/a3032e0f-29b0-413d-9ed5-dfbd346085b5
 
 ブラウザーだけで利用でき、このアプリのアカウント登録は不要です。TODOとメモは、利用している端末・ブラウザーのlocalStorageに保存します。
 
@@ -219,8 +221,8 @@ localStorageへの保存失敗、不正なJSON、重複するIDなども考え�
 
 ## 開発期間・作業時間など
 
-- 開発期間：2026/10/18〜2026/10/21
-- 作業時間：約16時間
+- 開発期間：2026/10/17〜2026/10/22
+- 作業時間：約18時間
 - 開発支援：Codex
 
 制作では、機能要件やデザインの方針を決め、実際に操作して気になった点を具体化しながら改善を進めました。Codexには、要件の相談、コードの作成・修正、リファクタリング、テスト、READMEの作成などの支援を受けました。
