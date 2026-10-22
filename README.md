@@ -8,7 +8,7 @@
 
 リンク：```https://tzug1729.github.io/todo/```
 
-https://github.com/user-attachments/assets/a3032e0f-29b0-413d-9ed5-dfbd346085b5
+https://github.com/user-attachments/assets/892dc094-22d2-45e4-be10-b221142fe6bd
 
 ブラウザーだけで利用でき、このアプリのアカウント登録は不要です。TODOとメモは、利用している端末・ブラウザーのlocalStorageに保存します。
 
