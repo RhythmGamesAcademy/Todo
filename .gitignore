@@ -7,6 +7,6 @@ artifacts/
 AGENTS.md
 .env
 .vscode
-
+.superpowers
 .vercel
 .env*
