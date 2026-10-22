@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 import type {
   FullQueryResults,
@@ -12,6 +13,7 @@ export type Sql = (
 export type SqlCall = ReturnType<Sql>;
 export type Transact = (statements: SqlCall[]) => Promise<void>;
 export type DbInfo = {
+  urlFingerprint: string;
   database: string;
   user: string;
   schema: string;
@@ -51,6 +53,7 @@ export function makeDb(url: string): {
       lists: string | null;
     }>;
     return {
+      urlFingerprint: createHash("sha256").update(url).digest("hex"),
       database: row.database,
       user: row.user,
       schema: row.schema,
