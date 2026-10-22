@@ -16,11 +16,12 @@ import {
   computeActivities,
   generateToken,
 } from "./domain.js";
-import type { Sql, SqlCall, Transact } from "./sql.js";
+import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
 
 export interface AppDeps {
   sql: Sql;
   transact: Transact;
+  describe?: () => Promise<DbInfo>;
 }
 
 interface ListRow {
@@ -166,7 +167,7 @@ async function readOptionalJson(c: Context): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>;
 }
 
-export function createApp({ sql, transact }: AppDeps): Hono {
+export function createApp({ sql, transact, describe }: AppDeps): Hono {
   const app = new Hono();
 
   const findList = async (token: string): Promise<ListRow | null> => {
@@ -645,7 +646,15 @@ export function createApp({ sql, transact }: AppDeps): Hono {
   app.onError((error, c) => {
     if (error instanceof ApiException)
       return c.json({ error: error.message }, error.status);
-    console.error(error);
+    if (describe) {
+      void describe()
+        .then((info) => console.error(error, { database: info }))
+        .catch((diagnosticError: unknown) =>
+          console.error(error, { databaseDiagnosticError: diagnosticError }),
+        );
+    } else {
+      console.error(error);
+    }
     return c.json({ error: "internal server error" }, 500);
   });
 
