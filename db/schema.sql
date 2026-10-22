@@ -72,7 +72,7 @@ CREATE INDEX users_list_id_idx ON users (list_id);
 
 -- 書き込みのたびに lists.revision を進める。memos は list_id を持たないため
 -- todo 経由で対象リストを解決する。重複加算は許容(単調増加であればよい)。
-CREATE FUNCTION bump_list_revision() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION bump_list_revision() RETURNS trigger AS $$
 DECLARE
   target_list_id UUID;
 BEGIN
@@ -85,7 +85,7 @@ BEGIN
   ELSE
     target_list_id := NEW.list_id;
   END IF;
-  UPDATE lists SET revision = revision + 1 WHERE id = target_list_id;
+  UPDATE public.lists SET revision = revision + 1 WHERE id = target_list_id;
   RETURN NULL;
 END $$ LANGUAGE plpgsql;
 

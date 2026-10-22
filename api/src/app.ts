@@ -171,7 +171,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
 
   const findList = async (token: string): Promise<ListRow | null> => {
     const [list] = rowsOf<ListRow>(
-      await sql`SELECT id, title, revision FROM lists WHERE token = ${token}`,
+      await sql`SELECT id, title, revision FROM public.lists WHERE token = ${token}`,
     );
     return list ?? null;
   };
@@ -184,7 +184,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
   ): Promise<UserRefRow | null> => {
     if (!UUID.test(userId)) return null;
     const [user] = rowsOf<UserRefRow>(
-      await sql`SELECT id, name FROM users WHERE list_id = ${listId} AND id = ${userId}`,
+      await sql`SELECT id, name FROM public.users WHERE list_id = ${listId} AND id = ${userId}`,
     );
     return user ?? null;
   };
@@ -212,7 +212,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
 
   const readRevision = async (listId: string): Promise<number> => {
     const [row] = rowsOf<{ revision: string | number }>(
-      await sql`SELECT revision FROM lists WHERE id = ${listId}`,
+      await sql`SELECT revision FROM public.lists WHERE id = ${listId}`,
     );
     if (!row) throw new ApiException(404, "list not found");
     return Number(row.revision);
@@ -227,7 +227,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
       await sql`
         SELECT id, title, description, status, priority, due, assignee_id,
                created_at, updated_at, deleted_at
-        FROM todos
+        FROM public.todos
         WHERE id = ${id} AND list_id = ${listId}
       `,
     );
@@ -246,7 +246,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     // now() はトランザクション開始時刻で同一になるため、履歴の並び順を保つために
     // 実行時刻の clock_timestamp() を明示する。
     sql`
-      INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+      INSERT INTO public.activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
       VALUES (${randomUUID()}, ${listId}, ${todoId}, ${userId}, ${kind}, ${field}, ${before}, ${after}, clock_timestamp())
     `;
 
@@ -259,10 +259,10 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     const userId = randomUUID();
     const activityId = randomUUID();
     await transact([
-      sql`INSERT INTO lists (id, token, title) VALUES (${listId}, ${token}, ${title})`,
-      sql`INSERT INTO users (id, list_id, name) VALUES (${userId}, ${listId}, ${name})`,
+      sql`INSERT INTO public.lists (id, token, title) VALUES (${listId}, ${token}, ${title})`,
+      sql`INSERT INTO public.users (id, list_id, name) VALUES (${userId}, ${listId}, ${name})`,
       sql`
-        INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+        INSERT INTO public.activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
         VALUES (${activityId}, ${listId}, NULL, ${userId}, 'user.joined', NULL, NULL, ${name}, clock_timestamp())
       `,
     ]);
@@ -277,7 +277,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     const userId = await readOptionalUserId(body, list.id);
 
     await transact([
-      sql`UPDATE lists SET title = ${title} WHERE id = ${list.id}`,
+      sql`UPDATE public.lists SET title = ${title} WHERE id = ${list.id}`,
       addActivity(
         list.id,
         null,
@@ -296,7 +296,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     if (!list) return notFound(c);
     // 子テーブルは FK の ON DELETE CASCADE で物理削除される。
     // 確認 UI はクライアント側の責務なので、ここでは即時削除する。
-    await sql`DELETE FROM lists WHERE id = ${list.id}`;
+    await sql`DELETE FROM public.lists WHERE id = ${list.id}`;
     return c.json({}, 200);
   });
 
@@ -317,18 +317,18 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     // 既存名の再参加では INSERT が競合し、EXISTS が偽になるため履歴も増えない。
     await transact([
       sql`
-        INSERT INTO users (id, list_id, name)
+        INSERT INTO public.users (id, list_id, name)
         VALUES (${userId}, ${list.id}, ${name})
         ON CONFLICT (list_id, name) DO NOTHING
       `,
       sql`
-        INSERT INTO activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+        INSERT INTO public.activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
         SELECT ${activityId}, ${list.id}, NULL, ${userId}, 'user.joined', NULL, NULL, ${name}, clock_timestamp()
-        WHERE EXISTS (SELECT 1 FROM users WHERE id = ${userId})
+        WHERE EXISTS (SELECT 1 FROM public.users WHERE id = ${userId})
       `,
     ]);
     const [user] = rowsOf<{ id: string }>(
-      await sql`SELECT id FROM users WHERE list_id = ${list.id} AND name = ${name}`,
+      await sql`SELECT id FROM public.users WHERE list_id = ${list.id} AND name = ${name}`,
     );
     if (!user) throw new Error("failed to resolve joined user");
     return c.json({ userId: user.id, name });
@@ -346,12 +346,12 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     if (name === user.name) return c.json({ userId: user.id, name });
 
     const [conflict] = rowsOf<{ id: string }>(
-      await sql`SELECT id FROM users WHERE list_id = ${list.id} AND name = ${name} AND id <> ${user.id}`,
+      await sql`SELECT id FROM public.users WHERE list_id = ${list.id} AND name = ${name} AND id <> ${user.id}`,
     );
     if (conflict) throw new ApiException(409, "name already in use");
 
     await transact([
-      sql`UPDATE users SET name = ${name} WHERE id = ${user.id} AND list_id = ${list.id}`,
+      sql`UPDATE public.users SET name = ${name} WHERE id = ${user.id} AND list_id = ${list.id}`,
       addActivity(
         list.id,
         null,
@@ -377,7 +377,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     // activity を先に挿入する。担当 TODO の assignee_id も同じく NULL になる。
     await transact([
       addActivity(list.id, null, userId, "user.removed", null, user.name, null),
-      sql`DELETE FROM users WHERE id = ${user.id} AND list_id = ${list.id}`,
+      sql`DELETE FROM public.users WHERE id = ${user.id} AND list_id = ${list.id}`,
     ]);
     return c.json({}, 200);
   });
@@ -408,7 +408,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     const id = randomUUID();
     await transact([
       sql`
-        INSERT INTO todos (id, list_id, title, description, status, priority, due, assignee_id)
+        INSERT INTO public.todos (id, list_id, title, description, status, priority, due, assignee_id)
         VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${assigneeId})
       `,
       addActivity(list.id, id, userId, "todo.created", null, null, title),
@@ -484,7 +484,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
 
     await transact([
       sql`
-        UPDATE todos SET
+        UPDATE public.todos SET
           title = CASE WHEN ${has.title} THEN ${patch.title ?? before.title} ELSE title END,
           description = CASE WHEN ${has.description} THEN ${patch.description ?? before.description} ELSE description END,
           due = CASE WHEN ${has.deadline} THEN ${nextDeadline}::timestamptz ELSE due END,
@@ -522,7 +522,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
 
     await transact([
       sql`
-        UPDATE todos SET deleted_at = now()
+        UPDATE public.todos SET deleted_at = now()
         WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NULL
       `,
       addActivity(
@@ -551,7 +551,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
 
     await transact([
       sql`
-        UPDATE todos SET deleted_at = NULL, updated_at = now()
+        UPDATE public.todos SET deleted_at = NULL, updated_at = now()
         WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NOT NULL
       `,
       addActivity(
@@ -578,7 +578,7 @@ export function createApp({ sql, transact }: AppDeps): Hono {
     const userId = await readOptionalUserId(body, list.id);
     const id = randomUUID();
     await sql`
-      INSERT INTO memos (id, todo_id, user_id, body)
+      INSERT INTO public.memos (id, todo_id, user_id, body)
       VALUES (${id}, ${row.id}, ${userId}, ${text})
     `;
     return c.json({ id }, 201);
@@ -590,10 +590,10 @@ export function createApp({ sql, transact }: AppDeps): Hono {
 
     const [usersResult, todosResult, memosResult, activitiesResult] =
       await Promise.all([
-        sql`SELECT id, name, created_at FROM users WHERE list_id = ${list.id} ORDER BY created_at, id`,
-        sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
-        sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM memos m JOIN todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
-        sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM activities WHERE list_id = ${list.id} ORDER BY created_at, id`,
+        sql`SELECT id, name, created_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
+        sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
+        sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
+        sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at, id`,
       ]);
 
     const notesByTodo = new Map<string, Note[]>();
