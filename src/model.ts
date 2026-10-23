@@ -3,11 +3,13 @@ export type Status = "todo" | "doing" | "done";
 export type Priority = "high" | "medium" | "low";
 export type Filter = "all" | "overdue" | "active" | "today" | "doing" | "done";
 export type Sort = "deadline" | "priority";
+export type AssigneeFilter = "any" | "none" | string;
 export interface Note {
   id: string;
   text: string;
   createdAt: string;
   editedAt?: string;
+  userId: string | null;
 }
 export interface Todo {
   id: string;
@@ -16,6 +18,7 @@ export interface Todo {
   deadline: string | null;
   priority: Priority;
   status: Status;
+  assigneeId: string | null;
   createdAt: string;
   updatedAt: string;
   notes: Note[];
@@ -26,8 +29,8 @@ export interface TodoDraft {
   deadline: string | null;
   priority: Priority;
   status: Status;
+  assigneeId: string | null;
 }
-export const STORAGE_KEY = "hitotsuzutsu.todos.v1";
 export const STATUS: Record<Status, string> = messages.status;
 export const PRIORITY: Record<Priority, string> = messages.priority;
 export const FILTER_LABEL: Record<Filter, string> = messages.filters.heading;
@@ -85,6 +88,7 @@ export function selectTodos(
   search: string,
   sort: Sort,
   now: Date,
+  assignee: AssigneeFilter,
 ) {
   const query = search.trim().toLocaleLowerCase();
   const ranks = { high: 0, medium: 1, low: 2 };
@@ -103,6 +107,10 @@ export function selectTodos(
         (filter === "done" && t.status === "done");
       return (
         matches &&
+        (assignee === "any" ||
+          (assignee === "none"
+            ? t.assigneeId === null
+            : t.assigneeId === assignee)) &&
         (!query ||
           [t.title, t.description, ...t.notes.map((n) => n.text)].some((s) =>
             s.toLocaleLowerCase().includes(query),
@@ -145,124 +153,7 @@ export function calendarUrl(todo: Todo, browser = false) {
       : "https://calendar.google.com/calendar/render?") + params.toString()
   );
 }
-export function serializeTodos(todos: Todo[]) {
-  return JSON.stringify({ version: 1, todos });
-}
-const record = (x: unknown): x is Record<string, unknown> =>
+export const record = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
-const validDate = (x: unknown): x is string =>
+export const validDate = (x: unknown): x is string =>
   typeof x === "string" && Number.isFinite(Date.parse(x));
-export function parseTodos(raw: string): Todo[] {
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    throw new Error(messages.errors.invalidBackup);
-  }
-  if (
-    !record(data) ||
-    data.version !== 1 ||
-    !Array.isArray(data.todos) ||
-    data.todos.length > 10000
-  )
-    throw new Error(messages.errors.invalidBackup);
-  const ids = new Set<string>();
-  for (const t of data.todos) {
-    if (
-      !record(t) ||
-      typeof t.id !== "string" ||
-      !t.id ||
-      ids.has(t.id) ||
-      typeof t.title !== "string" ||
-      !t.title.trim() ||
-      t.title.length > 120 ||
-      typeof t.description !== "string" ||
-      t.description.length > 2000 ||
-      !(t.deadline === null || validDate(t.deadline)) ||
-      !["high", "medium", "low"].includes(String(t.priority)) ||
-      !["todo", "doing", "done"].includes(String(t.status)) ||
-      !validDate(t.createdAt) ||
-      !validDate(t.updatedAt) ||
-      !Array.isArray(t.notes)
-    )
-      throw new Error(messages.errors.invalidTodo);
-    ids.add(t.id);
-    const noteIds = new Set<string>();
-    for (const n of t.notes) {
-      if (
-        !record(n) ||
-        typeof n.id !== "string" ||
-        !n.id ||
-        noteIds.has(n.id) ||
-        typeof n.text !== "string" ||
-        !n.text.trim() ||
-        n.text.length > 2000 ||
-        !validDate(n.createdAt) ||
-        (n.editedAt !== undefined && !validDate(n.editedAt))
-      )
-        throw new Error(messages.errors.invalidNote);
-      noteIds.add(n.id);
-    }
-  }
-  return data.todos as Todo[];
-}
-
-export type RestoreMode = "replace" | "merge" | "add";
-export interface RestorePlan {
-  todos: Todo[];
-  added: number;
-  updated: number;
-  removed: number;
-  unchanged: number;
-}
-export function mergeNotes(existing: Note[], incoming: Note[]): Note[] {
-  const notes = new Map(existing.map((note) => [note.id, note]));
-  for (const note of incoming) notes.set(note.id, note);
-  return [...notes.values()].sort(
-    (a, b) =>
-      Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
-      a.id.localeCompare(b.id),
-  );
-}
-export function planRestore(
-  existing: Todo[],
-  incoming: Todo[],
-  mode: RestoreMode,
-): RestorePlan {
-  const oldById = new Map(existing.map((todo) => [todo.id, todo]));
-  const newById = new Map(incoming.map((todo) => [todo.id, todo]));
-  let todos: Todo[];
-  if (mode === "replace") todos = [...incoming];
-  else {
-    todos = existing.map((todo) => {
-      const imported = newById.get(todo.id);
-      if (!imported || mode === "add") return todo;
-      return {
-        ...todo,
-        title: imported.title,
-        description: imported.description,
-        deadline: imported.deadline,
-        priority: imported.priority,
-        status: imported.status,
-        updatedAt: imported.updatedAt,
-        notes: mergeNotes(todo.notes, imported.notes),
-      };
-    });
-    todos.push(...incoming.filter((todo) => !oldById.has(todo.id)));
-  }
-  if (todos.length > 10000) throw new Error(messages.errors.tooManyTodos);
-  const finalIds = new Set(todos.map((todo) => todo.id));
-  const added = todos.filter((todo) => !oldById.has(todo.id)).length;
-  const updated = todos.filter((todo) => {
-    const old = oldById.get(todo.id);
-    return old && JSON.stringify(old) !== JSON.stringify(todo);
-  }).length;
-  const removed = existing.filter((todo) => !finalIds.has(todo.id)).length;
-  return {
-    todos,
-    added,
-    updated,
-    removed,
-    unchanged: todos.length - added - updated,
-  };
-}

@@ -4,3 +4,9 @@ dist/
 *.tsbuildinfo
 .vercel/
 artifacts/
+AGENTS.md
+.env
+.vscode
+.superpowers
+.vercel
+.env*
