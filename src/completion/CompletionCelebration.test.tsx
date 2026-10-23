@@ -10,135 +10,8 @@ import {
 } from "@testing-library/react";
 import App from "../App";
 import { messages } from "../messages";
+import { parseTodos, serializeTodos, STORAGE_KEY } from "../model";
 import type { Todo } from "../model";
-
-const TEST_STORAGE_KEY = "hitotsuzutsu.completion-test.v1";
-const readStored = (): Todo[] => {
-  const raw = localStorage.getItem(TEST_STORAGE_KEY);
-  return raw ? (JSON.parse(raw) as Todo[]) : [];
-};
-const writeStored = (todos: Todo[]) => {
-  localStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(todos));
-};
-
-const remote = vi.hoisted(() => {
-  const listeners = new Set<() => void>();
-  return {
-    version: 0,
-    listeners,
-    notify() {
-      this.version += 1;
-      listeners.forEach((listener) => listener());
-    },
-  };
-});
-
-vi.mock("../cloud/useBoard", async () => {
-  const { useSyncExternalStore } = await import("react");
-  const key = "hitotsuzutsu.completion-test.v1";
-  const removed = new Map<string, Todo>();
-  const now = () => new Date().toISOString();
-  const read = (): Todo[] => {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as Todo[]) : [];
-  };
-  const write = (todos: Todo[]) => {
-    localStorage.setItem(key, JSON.stringify(todos));
-    remote.notify();
-  };
-  return {
-    useBoard: () => {
-      useSyncExternalStore(
-        (listener: () => void) => {
-          remote.listeners.add(listener);
-          return () => remote.listeners.delete(listener);
-        },
-        () => remote.version,
-      );
-      const todos = read();
-      return {
-        phase: "ready",
-        state: {
-          list: { id: "list", title: "共有リスト", revision: 1 },
-          users: [
-            {
-              id: "me",
-              name: "自分",
-              createdAt: "2026-10-19T00:00:00Z",
-            },
-          ],
-          todos,
-          activities: [],
-        },
-        me: { token: "token", userId: "me", name: "自分" },
-        refresh: () => {},
-        addTodo: async (draft: Todo) => {
-          const timestamp = now();
-          write([
-            ...todos,
-            {
-              ...draft,
-              id: crypto.randomUUID(),
-              notes: [],
-              createdAt: timestamp,
-              updatedAt: timestamp,
-            },
-          ]);
-        },
-        updateTodo: async (id: string, patch: Partial<Todo>) => {
-          write(
-            todos.map((todo) =>
-              todo.id === id ? { ...todo, ...patch, updatedAt: now() } : todo,
-            ),
-          );
-        },
-        removeTodo: async (id: string) => {
-          const found = todos.find((todo) => todo.id === id);
-          if (found) removed.set(id, found);
-          write(todos.filter((todo) => todo.id !== id));
-        },
-        undoRemove: async (id: string) => {
-          const found = removed.get(id);
-          if (found && !read().some((todo) => todo.id === id))
-            write([...read(), found]);
-        },
-        addMemo: async (todoId: string, body: string) => {
-          const timestamp = now();
-          write(
-            todos.map((todo) =>
-              todo.id === todoId
-                ? {
-                    ...todo,
-                    notes: [
-                      ...todo.notes,
-                      {
-                        id: crypto.randomUUID(),
-                        text: body,
-                        createdAt: timestamp,
-                        userId: "me",
-                      },
-                    ],
-                    updatedAt: timestamp,
-                  }
-                : todo,
-            ),
-          );
-        },
-        setAssignee: async (id: string, assigneeId: string | null) => {
-          write(
-            todos.map((todo) =>
-              todo.id === id ? { ...todo, assigneeId, updatedAt: now() } : todo,
-            ),
-          );
-        },
-        renameBoard: async () => {},
-        removeBoard: async () => {},
-        renameMember: async () => {},
-        removeMember: async () => {},
-      };
-    },
-  };
-});
 
 interface Play {
   frames: Keyframe[];
@@ -153,17 +26,11 @@ const task: Todo = {
   description: "提出前の確認",
   status: "doing",
   priority: "medium",
-  assigneeId: null,
   deadline: null,
   createdAt: "2026-10-19T00:00:00Z",
   updatedAt: "2026-10-19T00:00:00Z",
   notes: [
-    {
-      id: "progress",
-      text: "メモも残す",
-      createdAt: "2026-10-19T00:00:00Z",
-      userId: "me",
-    },
+    { id: "progress", text: "メモも残す", createdAt: "2026-10-19T00:00:00Z" },
   ],
 };
 const doneMenu = () =>
@@ -188,7 +55,7 @@ let destination = rect(288, 80, 14, 18);
 
 beforeEach(() => {
   localStorage.clear();
-  writeStored([task]);
+  localStorage.setItem(STORAGE_KEY, serializeTodos([task]));
   plays = [];
   destination = rect(288, 80, 14, 18);
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
@@ -281,7 +148,7 @@ describe("完了のトド演出", () => {
         id: "other-" + index,
         title: "other-" + index,
       }));
-      writeStored([task, ...others]);
+      localStorage.setItem(STORAGE_KEY, serializeTodos([task, ...others]));
       render(<App />);
       // Starting in another filter still stages the animation on the unfinished tab.
       fireEvent.click(
@@ -316,7 +183,9 @@ describe("完了のトド演出", () => {
     const mounted = render(<App />);
     openTask();
     complete();
-    expect(readStored()[0].status).toBe("done");
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].status).toBe(
+      "done",
+    );
     expect(plays).toHaveLength(0);
     expect(counter().textContent).toBe("0");
     await closeTask();
@@ -362,7 +231,9 @@ describe("完了のトド演出", () => {
     expect(
       screen.getByRole("button", { name: messages.todo.openLabel(task.title) }),
     ).toBeTruthy();
-    expect(readStored()[0].notes).toEqual(task.notes);
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes).toEqual(
+      task.notes,
+    );
     mounted.unmount();
     render(<App />);
     expect(plays).toHaveLength(5);
@@ -397,7 +268,9 @@ describe("完了のトド演出", () => {
       plays[0].finish();
     });
     expect(plays).toHaveLength(1);
-    expect(readStored()[0].status).toBe("done");
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].status).toBe(
+      "done",
+    );
   });
   it("完了を取り消してから閉じた場合は演出しない", async () => {
     render(<App />);
@@ -439,7 +312,9 @@ describe("完了のトド演出", () => {
     await closeTask();
     expect(plays).toHaveLength(0);
     expect(counter().textContent).toBe("0");
-    expect(readStored()[0].status).toBe("doing");
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].status).toBe(
+      "doing",
+    );
   });
   it("未送信メモがある間は入力破棄の確認を保ち、入力を続けると演出は始まらない", async () => {
     render(<App />);
