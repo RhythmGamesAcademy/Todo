@@ -2,7 +2,7 @@ import { messages } from "./messages";
 import { useEffect, useState } from "react";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
-type TodoLayout = "cards" | "compact";
+export type TodoLayout = "cards" | "compact";
 const LAYOUT_KEY = "todo:layout";
 export function useTodoLayout() {
   const [layout, setLayout] = useState<TodoLayout>(() => {
@@ -56,7 +56,8 @@ export function useTodoStore() {
   function save(todos: Todo[], recover = false) {
     if (stored.recovery && !recover) return false;
     try {
-      localStorage.setItem(STORAGE_KEY, serializeTodos(todos));
+      if (todos.length === 0) localStorage.removeItem(STORAGE_KEY);
+      else localStorage.setItem(STORAGE_KEY, serializeTodos(todos));
       setStored({ todos, recovery: null, error: null });
       return true;
     } catch {

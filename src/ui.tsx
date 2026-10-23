@@ -6,8 +6,6 @@ import {
   ArrowUpRight,
   CalendarDays,
   Check,
-  CheckCheck,
-  Circle,
   ArrowUp,
   UserRound,
   Flag,
@@ -17,6 +15,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { TodoStatusBadge } from "./components/TodoStatusBadge";
+import { TODO_LIMITS } from "./model";
 import {
   calendarUrl,
   clockText,
@@ -134,24 +134,14 @@ export function TodoCard({
       aria-description={nextDue ? messages.todo.nextDeadline : undefined}
     >
       <div className="card-meta flex items-center justify-between gap-3">
-        {!compact && (
-          <span className={"status-badge status-" + todo.status}>
-            {todo.status === "done" ? (
-              <CheckCheck size={14} />
-            ) : todo.status === "doing" ? (
-              <span className="status-dot" />
-            ) : (
-              <Circle size={12} />
-            )}{" "}
-            {STATUS[todo.status]}
-          </span>
-        )}
+        {!compact && <TodoStatusBadge status={todo.status} />}
         <span className={"priority priority-" + todo.priority}>
           <Flag size={13} />
           {messages.todo.priorityLabel(PRIORITY[todo.priority])}
         </span>
       </div>
       <div className="card-summary">
+        {compact && <TodoStatusBadge status={todo.status} />}
         <h3>{todo.title}</h3>
         <p
           className={
@@ -206,14 +196,12 @@ export function TodoForm({
   onSave,
   onCancel,
   onDirty,
-  ask,
 }: {
   todo?: Todo;
   setDeadline?: boolean;
   onSave: (draft: TodoDraft) => boolean;
   onCancel: () => void;
   onDirty: (dirty: boolean) => void;
-  ask: (options: AskOptions) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState(todo?.title ?? "");
   const [description, setDescription] = useState(todo?.description ?? "");
@@ -238,7 +226,7 @@ export function TodoForm({
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
-  async function submit(e: FormEvent<HTMLFormElement>) {
+  function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!title.trim()) {
       setError(messages.todo.titleRequired);
@@ -256,25 +244,6 @@ export function TodoForm({
       }
       deadlineIso = new Date(deadline).toISOString();
     }
-    if (noDeadline && (!todo || todo.deadline !== null)) {
-      const confirmed = await ask({
-        title: todo
-          ? messages.todo.noDeadlineConfirm.saveTitle
-          : messages.todo.noDeadlineConfirm.createTitle,
-        description: messages.todo.noDeadlineConfirm.description,
-        confirm: todo
-          ? messages.todo.noDeadlineConfirm.save
-          : messages.todo.noDeadlineConfirm.create,
-        cancel: messages.todo.noDeadlineConfirm.set,
-      });
-      if (!confirmed) {
-        setNoDeadline(false);
-        requestAnimationFrame(() =>
-          document.getElementById("todo-deadline")?.focus(),
-        );
-        return;
-      }
-    }
     onSave({
       title: title.trim(),
       description: description.trim(),
@@ -285,10 +254,15 @@ export function TodoForm({
   }
   return (
     <form onSubmit={submit} className="todo-form">
-      <label className="field-label" htmlFor="todo-title">
-        {messages.todo.title}
-        <span className="required">{messages.common.required}</span>
-      </label>
+      <div className="field-heading">
+        <label className="field-label" htmlFor="todo-title">
+          {messages.todo.title}
+          <span className="required">{messages.common.required}</span>
+        </label>
+        <span className="char-count" id="todo-title-count">
+          {messages.common.characters(title.length, TODO_LIMITS.title)}
+        </span>
+      </div>
       <input
         autoFocus={!focusDeadline}
         id="todo-title"
@@ -297,7 +271,8 @@ export function TodoForm({
           setTitle(e.target.value);
           setError("");
         }}
-        maxLength={120}
+        maxLength={TODO_LIMITS.title}
+        aria-describedby="todo-title-count"
         required
         placeholder={messages.todo.title}
         className="field title-input"
@@ -307,15 +282,19 @@ export function TodoForm({
           {messages.todo.description}
           <span className="optional">{messages.common.optional}</span>
         </label>
-        <span className="char-count">
-          {messages.common.characters(description.length, 2000)}
+        <span className="char-count" id="todo-description-count">
+          {messages.common.characters(
+            description.length,
+            TODO_LIMITS.description,
+          )}
         </span>
       </div>
       <textarea
         id="todo-description"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        maxLength={2000}
+        maxLength={TODO_LIMITS.description}
+        aria-describedby="todo-description-count"
         rows={3}
         placeholder={messages.todo.description}
         className="field"
@@ -323,6 +302,9 @@ export function TodoForm({
       <div className="field-heading">
         <label className="field-label" htmlFor="todo-deadline">
           {messages.todo.deadline}
+          {!noDeadline && (
+            <span className="required">{messages.common.required}</span>
+          )}
         </label>
         <label className="checkbox-label">
           <input

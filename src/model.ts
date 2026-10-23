@@ -28,6 +28,7 @@ export interface TodoDraft {
   status: Status;
 }
 export const STORAGE_KEY = "hitotsuzutsu.todos.v1";
+export const TODO_LIMITS = { title: 120, description: 2000 } as const;
 export const STATUS: Record<Status, string> = messages.status;
 export const PRIORITY: Record<Priority, string> = messages.priority;
 export const FILTER_LABEL: Record<Filter, string> = messages.filters.heading;
@@ -175,9 +176,9 @@ export function parseTodos(raw: string): Todo[] {
       ids.has(t.id) ||
       typeof t.title !== "string" ||
       !t.title.trim() ||
-      t.title.length > 120 ||
+      t.title.length > TODO_LIMITS.title ||
       typeof t.description !== "string" ||
-      t.description.length > 2000 ||
+      t.description.length > TODO_LIMITS.description ||
       !(t.deadline === null || validDate(t.deadline)) ||
       !["high", "medium", "low"].includes(String(t.priority)) ||
       !["todo", "doing", "done"].includes(String(t.status)) ||

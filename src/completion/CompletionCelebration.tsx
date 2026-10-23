@@ -19,7 +19,7 @@ export function CompletionCelebration({
   counter,
   onArrive,
 }: Props) {
-  const { layer, card, swimmer, body, features, stage } =
+  const { layer, card, swimmer, body, features, face, stage } =
     useCompletionAnimation(todo.id, {
       target,
       counter,
@@ -41,7 +41,7 @@ export function CompletionCelebration({
         }
         aria-hidden="true"
       >
-        <SeaLion body={body} features={features} />
+        <SeaLion body={body} features={features} face={face} />
         <div className="completion-paper" ref={card}>
           <span className="completion-seal">
             <Check size={29} strokeWidth={3} />

@@ -51,7 +51,10 @@ export function DataPanel({
     (todo) => bulkScope === "all" || todo.status === "done",
   );
   const storageBytes = useMemo(
-    () => ((recovery ?? serializeTodos(todos)).length + STORAGE_KEY.length) * 2,
+    () =>
+      recovery === null && todos.length === 0
+        ? 0
+        : ((recovery ?? serializeTodos(todos)).length + STORAGE_KEY.length) * 2,
     [todos, recovery],
   );
   const changed = preview.plan
@@ -124,7 +127,8 @@ export function DataPanel({
             targets.length,
             countNotes(targets),
           ),
-          confirm: messages.data.bulk.action,
+          confirm: messages.data.bulk.confirm,
+          cancel: messages.data.bulk.cancel,
           danger: true,
         })
       ) {
@@ -287,31 +291,49 @@ export function DataPanel({
         aria-labelledby="bulk-title"
       >
         <h3 id="bulk-title">{messages.data.bulk.title}</h3>
-        <label className="field-label" htmlFor="bulk-scope">
-          {messages.data.bulk.target}
-        </label>
-        <select
-          className="field"
-          id="bulk-scope"
-          value={bulkScope}
-          onChange={(e) => setBulkScope(e.target.value as "done" | "all")}
-          disabled={!!recovery || busy}
-        >
-          <option value="done">{messages.data.bulk.done}</option>
-          <option value="all">{messages.data.bulk.all}</option>
-        </select>
-        <p className="bulk-count">
-          {messages.data.summary(targets.length, countNotes(targets))}
-        </p>
-        <p className="field-hint">{messages.data.bulk.notice}</p>
-        <button
-          className="button button-danger"
-          disabled={!targets.length || !!recovery || busy}
-          onClick={bulkDelete}
-        >
-          <Trash2 size={17} />
-          {messages.data.bulk.action}
-        </button>
+        <div className="bulk-controls">
+          <label className="field-label" htmlFor="bulk-scope">
+            {messages.data.bulk.target}
+          </label>
+          <select
+            className="field"
+            id="bulk-scope"
+            value={bulkScope}
+            onChange={(e) => setBulkScope(e.target.value as "done" | "all")}
+            disabled={!!recovery || busy}
+            aria-describedby="bulk-count bulk-notice"
+          >
+            <option value="done">{messages.data.bulk.done}</option>
+            <option value="all">{messages.data.bulk.all}</option>
+          </select>
+          <div
+            className="bulk-count"
+            id="bulk-count"
+            role="status"
+            aria-atomic="true"
+          >
+            <span className="bulk-count-badge">
+              {messages.data.bulk.todoCount(targets.length)}
+            </span>
+            <span className="bulk-count-badge">
+              {messages.data.bulk.noteCount(countNotes(targets))}
+            </span>
+          </div>
+          <p className="bulk-notice" id="bulk-notice">
+            <AlertCircle size={16} aria-hidden="true" />
+            <span>{messages.data.bulk.notice}</span>
+          </p>
+          <div className="bulk-actions">
+            <button
+              className="button button-danger"
+              disabled={!targets.length || !!recovery || busy}
+              onClick={bulkDelete}
+            >
+              <Trash2 size={17} aria-hidden="true" />
+              <span>{messages.data.bulk.actions[bulkScope]}</span>
+            </button>
+          </div>
+        </div>
       </section>
     </>
   );

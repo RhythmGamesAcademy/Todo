@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { messages } from "./messages";
 import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
 import type { Todo } from "./model";
 const task = (id: string, extra: Partial<Todo> = {}): Todo => ({
@@ -23,7 +24,12 @@ const task = (id: string, extra: Partial<Todo> = {}): Todo => ({
   updatedAt: "2026-10-02T00:00:00Z",
   ...extra,
 });
-const saved = () => parseTodos(localStorage.getItem(STORAGE_KEY)!);
+const bulkPanel = () =>
+  within(screen.getByRole("region", { name: messages.data.bulk.title }));
+const saved = () => {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw === null ? [] : parseTodos(raw);
+};
 const file = (todos: Todo[]) => {
   const raw = serializeTodos(todos);
   const file = new File([raw], "backup.json", { type: "application/json" });
@@ -59,6 +65,60 @@ async function upload(user: ReturnType<typeof userEvent.setup>, todos: Todo[]) {
   await user.upload(screen.getByLabelText("復元するJSONファイル"), file(todos));
 }
 describe("復元と一括削除の操作", () => {
+  it("対象を切り替えると文言と件数が変わり、0件は無効、キャンセルはTODOとメモを残す", async () => {
+    const existing = [
+      task("active", {
+        notes: [
+          { id: "a", text: "メモ1", createdAt: "2026-10-01T00:00:00Z" },
+          { id: "b", text: "メモ2", createdAt: "2026-10-02T00:00:00Z" },
+        ],
+      }),
+    ];
+    localStorage.setItem(STORAGE_KEY, serializeTodos(existing));
+    const user = userEvent.setup();
+    render(<App />);
+    await openData(user);
+    expect(bulkPanel().getByRole("status").textContent).toBe(
+      "TODO 0件メモ 0件",
+    );
+    const initialButton = bulkPanel().getByRole("button", {
+      name: messages.data.bulk.actions.done,
+    });
+    expect(initialButton).toHaveProperty("disabled", true);
+    await user.click(initialButton);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await user.selectOptions(
+      bulkPanel().getByLabelText(messages.data.bulk.target),
+      "all",
+    );
+    expect(bulkPanel().getByRole("status").textContent).toBe(
+      "TODO 1件メモ 2件",
+    );
+    const deleteAll = bulkPanel().getByRole("button", {
+      name: messages.data.bulk.actions.all,
+    });
+    expect(deleteAll).toHaveProperty("disabled", false);
+    expect(bulkPanel().getByText(messages.data.bulk.notice)).toBeTruthy();
+    await user.click(deleteAll);
+    const confirmation = within(screen.getByRole("alertdialog"));
+    expect(
+      confirmation.getByRole("button", { name: messages.data.bulk.confirm }),
+    ).toBeTruthy();
+    expect(saved()).toEqual(existing);
+    await user.click(
+      confirmation.getByRole("button", { name: messages.data.bulk.cancel }),
+    );
+    expect(saved()).toEqual(existing);
+    await user.selectOptions(
+      bulkPanel().getByLabelText(messages.data.bulk.target),
+      "done",
+    );
+    expect(
+      bulkPanel().getByRole("button", {
+        name: messages.data.bulk.actions.done,
+      }),
+    ).toHaveProperty("disabled", true);
+  });
   it("ファイル選択や確認のキャンセルだけでは変更せず、追加だけを選んで復元できる", async () => {
     const existing = [task("local")];
     localStorage.setItem(STORAGE_KEY, serializeTodos(existing));
@@ -157,33 +217,45 @@ describe("復元と一括削除の操作", () => {
     const user = userEvent.setup();
     render(<App />);
     await openData(user);
-    await user.click(screen.getByRole("button", { name: "まとめて削除" }));
+    expect(
+      bulkPanel().getByRole("button", {
+        name: messages.data.bulk.actions.done,
+      }),
+    ).toBeTruthy();
+    expect(bulkPanel().getByRole("status").textContent).toBe(
+      "TODO 1件メモ 1件",
+    );
+    await user.click(bulkPanel().getByRole("button"));
     expect(screen.getByRole("alertdialog").textContent).toContain(
       "TODO 1件とメモ 1件",
     );
     await user.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "キャンセル",
+        name: messages.data.bulk.cancel,
       }),
     );
     expect(saved()).toEqual(existing);
-    await user.click(screen.getByRole("button", { name: "まとめて削除" }));
+    await user.click(bulkPanel().getByRole("button"));
     await user.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "まとめて削除",
+        name: messages.data.bulk.confirm,
       }),
     );
     expect(saved().map((t) => t.id)).toEqual(["active"]);
+    expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
     await user.selectOptions(screen.getByLabelText("削除対象"), "all");
+    expect(
+      bulkPanel().getByRole("button", { name: messages.data.bulk.actions.all }),
+    ).toBeTruthy();
     const fail = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(Storage.prototype, "removeItem")
       .mockImplementation(() => {
-        throw new DOMException("quota", "QuotaExceededError");
+        throw new DOMException("blocked", "SecurityError");
       });
-    await user.click(screen.getByRole("button", { name: "まとめて削除" }));
+    await user.click(bulkPanel().getByRole("button"));
     await user.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "まとめて削除",
+        name: messages.data.bulk.confirm,
       }),
     );
     expect(saved().map((t) => t.id)).toEqual(["active"]);
@@ -191,18 +263,73 @@ describe("復元と一括削除の操作", () => {
       within(screen.getByRole("dialog")).getByRole("alert").textContent,
     ).toContain("保存できませんでした");
     fail.mockRestore();
-    await user.click(screen.getByRole("button", { name: "まとめて削除" }));
+    await user.click(bulkPanel().getByRole("button"));
     await user.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "まとめて削除",
+        name: messages.data.bulk.confirm,
       }),
     );
     expect(saved()).toEqual([]);
-    expect(screen.getByRole("button", { name: "まとめて削除" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(bulkPanel().getByRole("button")).toHaveProperty("disabled", true);
   });
+  it.each(["all", "done"] as const)(
+    "一括削除（%s）でTODOが0件になったら保存キーを削除し、表示設定と他のデータは残す",
+    async (scope) => {
+      const done = task("done", {
+        status: "done",
+        notes: [{ id: "n", text: "メモ", createdAt: "2026-10-01T00:00:00Z" }],
+      });
+      const existing = scope === "all" ? [task("active"), done] : [done];
+      localStorage.setItem(STORAGE_KEY, serializeTodos(existing));
+      localStorage.setItem("todo:layout", "compact");
+      localStorage.setItem("unrelated-data", "keep");
+      const user = userEvent.setup();
+      const mounted = render(<App />);
+      await openData(user);
+      await user.selectOptions(
+        bulkPanel().getByLabelText(messages.data.bulk.target),
+        scope,
+      );
+      const remove = vi.spyOn(Storage.prototype, "removeItem");
+      const write = vi.spyOn(Storage.prototype, "setItem");
+      await user.click(bulkPanel().getByRole("button"));
+      await user.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", {
+          name: messages.data.bulk.cancel,
+        }),
+      );
+      expect(saved()).toEqual(existing);
+      expect(remove).not.toHaveBeenCalled();
+      await user.click(bulkPanel().getByRole("button"));
+      await user.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", {
+          name: messages.data.bulk.confirm,
+        }),
+      );
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(remove).toHaveBeenCalledExactlyOnceWith(STORAGE_KEY);
+      expect(write).not.toHaveBeenCalled();
+      expect(localStorage.getItem("todo:layout")).toBe("compact");
+      expect(localStorage.getItem("unrelated-data")).toBe("keep");
+      expect(bulkPanel().getByRole("button")).toHaveProperty("disabled", true);
+      expect(screen.getByText(messages.data.storageSize("0.0"))).toBeTruthy();
+      mounted.unmount();
+      render(<App />);
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(
+        screen
+          .getByRole("button", { name: messages.layout.compact })
+          .getAttribute("aria-pressed"),
+      ).toBe("true");
+      expect(
+        screen.queryByRole("button", {
+          name: messages.todo.openLabel(done.title),
+        }),
+      ).toBeNull();
+    },
+  );
   it("壊れたファイルは復元せず、元のデータを保持する", async () => {
     const existing = [task("local")];
     localStorage.setItem(STORAGE_KEY, serializeTodos(existing));

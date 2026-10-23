@@ -24,16 +24,16 @@ export const messages = {
   filters: {
     heading: {
       all: "すべてのTODO",
-      overdue: "期限超過",
       active: "未完了",
+      overdue: "期限超過",
       today: "今日が期限",
       doing: "進行中",
       done: "完了したTODO",
     },
     navigation: {
       all: "すべてのTODO",
-      overdue: "期限超過",
       active: "未完了",
+      overdue: "期限超過",
       today: "今日が期限",
       doing: "進行中",
       done: "完了",
@@ -43,8 +43,8 @@ export const messages = {
     noResults: "検索結果なし",
   },
   search: {
-    label: "要素を検索",
-    clear: "検索をクリア",
+    label: "要素を検索する",
+    clear: "検索をクリアする",
     sort: "並べ替え",
     deadlineOrder: "期限が近い順",
     priorityOrder: "優先度が高い順",
@@ -52,19 +52,19 @@ export const messages = {
   layout: {
     label: "一覧の表示形式",
     cards: "カード",
-    compact: "簡潔",
+    compact: "リスト",
   },
   completion: {
     announced: (title: string) => "「" + title + "」を完了に移動しました",
-    skip: "演出をスキップ",
+    skip: "演出をスキップする",
     title: "タスクが完了しました",
-    allDone: "🎉 素晴らしい！すべて消化できました",
-    oneLeft: "🔥 残るは1個です！",
-    keepGoing: "🌊 この調子で頑張りましょう",
+    allDone: "素晴らしい！すべて消化できました🎉",
+    oneLeft: "残るは1個です🔥",
+    keepGoing: "この調子で頑張りましょう🌊",
   },
   todo: {
-    create: "新しいTODO",
-    createAction: "TODOを作成",
+    create: "TODOを作る",
+    createAction: "TODOを作る",
     edit: "TODOを編集",
     delete: "TODOを削除",
     save: "変更を保存",
@@ -126,7 +126,7 @@ export const messages = {
     revealing: "メモを表示中",
   },
   calendar: {
-    register: "Googleカレンダーに登録",
+    register: "Googleカレンダーに登録する",
     openLabel: "Googleカレンダーに登録（別タブで開く）",
     webOpen: "ブラウザー版で開く",
     webOpenLabel: "Googleカレンダーのブラウザー版で開く（別タブで開く）",
@@ -167,7 +167,7 @@ export const messages = {
           "同じIDの項目は読み込んだ値を採用します。メモは日時順に統合し、同じメモIDは読み込んだ内容を採用します。",
       },
       add: {
-        label: "ないTODOだけ追加",
+        label: "新規追加",
         description:
           "新しいIDだけ追加します。同じIDのTODOとメモは変更しません。",
         confirmation: "既存のTODOとメモは変更しません。",
@@ -209,8 +209,15 @@ export const messages = {
       target: "削除対象",
       done: "完了済みのTODO",
       all: "すべてのTODO",
-      action: "まとめて削除",
-      notice: "メモも削除されます。元に戻せません。",
+      actions: {
+        done: "完了済みのTODOを削除する",
+        all: "すべてのTODOを削除する",
+      },
+      confirm: "削除する",
+      cancel: "キャンセルする",
+      todoCount: (count: number) => "TODO " + count + "件",
+      noteCount: (count: number) => "メモ " + count + "件",
+      notice: "関連するメモも削除されます。この操作は取り消せません。",
       doneTitle: "完了済みのTODOを削除しますか？",
       allTitle: "すべてのTODOを削除しますか？",
       confirmation: (todos: number, notes: number) =>
