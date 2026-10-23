@@ -1,79 +1,5 @@
 // UI text and formatting live here. Replace this dictionary to add another locale.
 const pad = (value: number) => String(value).padStart(2, "0");
-const timelineCopy = {
-  heading: "変更履歴",
-  empty: "まだ記録はありません",
-  memoFallback: "削除されたメンバー",
-};
-const statusLabels = { todo: "未着手", doing: "進行中", done: "完了" };
-const priorityLabels = { high: "高", medium: "中", low: "低" };
-const noDeadlineLabel = "期限なし";
-const assigneeNoneLabel = "担当者なし";
-const formatDeadline = (date: Date, withYear: boolean) =>
-  (withYear ? date.getFullYear() + "年" : "") +
-  (date.getMonth() + 1) +
-  "月" +
-  date.getDate() +
-  "日 " +
-  pad(date.getHours()) +
-  ":" +
-  pad(date.getMinutes());
-const timelineFieldLabels: Record<string, string> = {
-  title: "タイトル",
-  description: "説明",
-  deadline: "期限",
-  priority: "優先度",
-  status: "状態",
-  assignee: "担当者",
-};
-function timelineDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatDeadline(date, true);
-}
-function timelineValue(field: string, value: string | null) {
-  switch (field) {
-    case "status":
-      return value
-        ? ((statusLabels as Record<string, string>)[value] ?? value)
-        : "";
-    case "priority":
-      return value
-        ? ((priorityLabels as Record<string, string>)[value] ?? value)
-        : "";
-    case "deadline":
-      return value ? timelineDate(value) : noDeadlineLabel;
-    case "assignee":
-      return value ? "「" + value + "」" : assigneeNoneLabel;
-    default:
-      return "「" + (value ?? "") + "」";
-  }
-}
-function timelineLine(
-  userName: string | null,
-  kind: string,
-  field: string | null,
-  before: string | null,
-  after: string | null,
-) {
-  const actor = userName ?? timelineCopy.memoFallback;
-  if (kind === "todo.created") return actor + "がTODOを作成しました";
-  if (kind === "todo.deleted") return actor + "がTODOを削除しました";
-  if (kind === "todo.restored") return actor + "がTODOを元に戻しました";
-  if (kind !== "todo.updated" || !field) return "";
-  const label = timelineFieldLabels[field];
-  if (!label) return "";
-  return (
-    actor +
-    "が" +
-    label +
-    "を" +
-    timelineValue(field, before) +
-    "から" +
-    timelineValue(field, after) +
-    "に変更しました"
-  );
-}
 export const messages = {
   locale: "ja",
   app: {
@@ -83,21 +9,18 @@ export const messages = {
     navigation: "TODOの表示",
     currentTime: "現在の日時",
   },
-  board: {
-    loading: "読み込み中…",
-  },
   common: {
     close: "閉じる",
     cancel: "キャンセル",
     undo: "元に戻す",
-    retry: "再試行",
     closeNotification: "通知を閉じる",
     required: "必須",
     optional: "任意",
     characters: (current: number, max: number) => current + " / " + max,
+    items: (count: number) => count + "件",
   },
-  status: statusLabels,
-  priority: priorityLabels,
+  status: { todo: "未着手", doing: "進行中", done: "完了" },
+  priority: { high: "高", medium: "中", low: "低" },
   filters: {
     heading: {
       all: "すべてのTODO",
@@ -118,16 +41,11 @@ export const messages = {
     showAll: "すべてのTODOを見る",
     empty: "TODOなし",
     noResults: "検索結果なし",
-    assignment: {
-      any: "すべてのメンバー",
-      none: assigneeNoneLabel,
-    },
   },
   search: {
     label: "要素を検索",
     clear: "検索をクリア",
     sort: "並べ替え",
-    assignee: "担当者",
     deadlineOrder: "期限が近い順",
     priorityOrder: "優先度が高い順",
   },
@@ -153,12 +71,10 @@ export const messages = {
     title: "タイトル",
     description: "説明",
     deadline: "期限",
-    noDeadline: noDeadlineLabel,
+    noDeadline: "期限なし",
     omitDeadline: "期限を設定しない",
     priority: "優先度",
     state: "状態",
-    assignee: "担当者",
-    assigneeUnknown: "不明なメンバー",
     overdue: "期限超過",
     nextDeadline: "直近の期限",
     today: "今日",
@@ -209,58 +125,6 @@ export const messages = {
     sent: "送信しました",
     revealing: "メモを表示中",
   },
-  activity: {
-    ...timelineCopy,
-    line: timelineLine,
-  },
-  manage: {
-    title: "リスト管理",
-    listTitleLabel: "リストのタイトル",
-    save: "保存",
-    membersTitle: "メンバー",
-    memberNameLabel: (name: string) => name + "の名前",
-    assignedCount: (count: number) => count + "件担当",
-    joinedAt: "参加日",
-    you: "あなた",
-    removeMember: "削除",
-    removeMemberTitle: (name: string) => "「" + name + "」を削除しますか？",
-    removeMemberDescription: (name: string) =>
-      "「" +
-      name +
-      "」をリストから削除します。担当中のTODOは未割り当てになります。",
-    removeSelfHint: "自分自身を削除すると、この画面に戻れなくなります。",
-    deleteList: "リストを削除",
-    deleteListTitle: "リストを削除しますか？",
-    deleteListWarning:
-      "リストを削除すると、このリストのすべてのTODO・メモ・変更履歴が完全に削除されます。元に戻せません。",
-    deleteListAction: "リストを削除する",
-    deleteListConfirmTitle: "本当にリストを削除しますか？",
-    deleteListConfirmDescription:
-      "すべてのタスク・メモ・履歴が削除されます。取り消せません。",
-    deleteListConfirm: "削除する",
-    dangerTitle: "リストの削除",
-    shareLabel: "共有URL",
-    copyShare: "共有URLをコピー",
-    copied: "共有URLをコピーしました",
-    dataTitle: "データ",
-    dataExport: "データの書き出し",
-  },
-  login: {
-    heading: "共有TODOへ参加",
-    joinTab: "既存リストに参加",
-    joinToken: "共有トークン",
-    joinName: "あなたの名前",
-    createTab: "新しいリストを作る",
-    createListTitle: "リストのタイトル",
-    createListName: "あなたの名前",
-    joinAction: "参加",
-    createAction: "作成",
-    creating: "作成中…",
-    joining: "参加中…",
-    invalidToken: "共有トークンが正しくありません。",
-    duplicatedName:
-      "同じ名前のメンバーがいます。異なる名前を入力してください。",
-  },
   calendar: {
     register: "Googleカレンダーに登録",
     openLabel: "Googleカレンダーに登録（別タブで開く）",
@@ -271,24 +135,121 @@ export const messages = {
     eventTitle: (title: string) => "【締切】" + title,
   },
   data: {
-    title: "データの書き出し",
-    location: "保存先：サーバー",
+    title: "データの保存・復元",
+    open: "データの保存・復元を開く",
+    location: "保存先：このブラウザ",
     storageNotice:
-      "リストのデータはサーバー上に保存され、全メンバーと共有されます。",
-    cloudSummary: (title: string, members: number) =>
-      "「" + title + "」・メンバー " + members + "人",
+      "ブラウザのサイトデータを削除すると、TODOとメモも消去されます。",
     summary: (todos: number, notes: number) =>
       "TODO " + todos + "件・メモ " + notes + "件",
+    storageSize: (kib: string) => "保存量（概算）" + kib + " KiB",
     exportTitle: "バックアップを書き出す",
     export: "書き出す",
     exportStarted: "バックアップの書き出しを開始しました",
-    exportFilename: (date: string) => "todo-cloud-" + date + ".json",
+    backupFilename: (date: string) => "todo-" + date + ".json",
+    restoreTitle: "バックアップから復元する",
+    method: "復元方法",
+    restore: "復元する",
+    fileLabel: "復元するJSONファイル",
+    chooseFile: "ファイルを選ぶ",
+    loading: "読み込み中…",
+    modes: {
+      replace: {
+        label: "完全上書き",
+        description: "現在のTODOとメモを、ファイルの内容に置き換えます。",
+        confirmation: "現在のTODOとメモを置き換えます。元に戻せません。",
+      },
+      merge: {
+        label: "更新＋新規追加",
+        description:
+          "同じIDは読み込んだ値で更新し、メモを時系列に統合。新しいIDも追加します。",
+        confirmation:
+          "同じIDの項目は読み込んだ値を採用します。メモは日時順に統合し、同じメモIDは読み込んだ内容を採用します。",
+      },
+      add: {
+        label: "ないTODOだけ追加",
+        description:
+          "新しいIDだけ追加します。同じIDのTODOとメモは変更しません。",
+        confirmation: "既存のTODOとメモは変更しません。",
+      },
+    },
+    restoreConfirmTitle: (mode: string) => mode + "で復元しますか？",
+    restoreConfirmDescription: (
+      added: number,
+      updated: number,
+      removed: number,
+      detail: string,
+    ) =>
+      "追加 " +
+      added +
+      "件、更新 " +
+      updated +
+      "件、削除 " +
+      removed +
+      "件。" +
+      detail,
+    restored: (added: number, updated: number, removed: number) =>
+      "復元しました（追加 " +
+      added +
+      "件・更新 " +
+      updated +
+      "件・削除 " +
+      removed +
+      "件）",
+    preview: {
+      added: "追加",
+      updated: "更新",
+      removed: "削除",
+      total: "復元後",
+      unchanged: "変更対象がありません。",
+    },
+    replaceOnly: "保存データを読み込めないため、完全上書きのみ利用できます。",
+    bulk: {
+      title: "TODOの一括削除",
+      target: "削除対象",
+      done: "完了済みのTODO",
+      all: "すべてのTODO",
+      action: "まとめて削除",
+      notice: "メモも削除されます。元に戻せません。",
+      doneTitle: "完了済みのTODOを削除しますか？",
+      allTitle: "すべてのTODOを削除しますか？",
+      confirmation: (todos: number, notes: number) =>
+        "TODO " +
+        todos +
+        "件とメモ " +
+        notes +
+        "件を削除します。元に戻せません。必要なデータは先に書き出してください。",
+      deleted: (count: number) => "TODO " + count + "件を削除しました",
+    },
+    recovery: {
+      title: "読み込めないデータを初期化",
+      description:
+        "先に書き出しを行ってください。初期化すると、現在の保存データは削除されます。",
+      action: "保存データを初期化",
+      confirmTitle: "保存データを初期化しますか？",
+      confirmDescription:
+        "この操作で保存されているTODOとメモをすべて削除します。元に戻せません。",
+      confirm: "初期化する",
+      done: "保存データを初期化しました",
+    },
   },
   errors: {
-    api: {
-      general: "通信エラーが発生しました。再試行してください。",
-    },
-    invalidState: "共有データを読み込めませんでした",
+    invalidBackup: "対応するバックアップ形式ではありません。",
+    invalidTodo: "TODOのデータが正しくありません。",
+    invalidNote: "メモのデータが正しくありません。",
+    tooManyTodos: "復元後のTODOは10,000件以内にしてください。",
+    restore: "復元できません。",
+    readFile: "ファイルを読み込めませんでした。",
+    fileTooLarge: "10MB以下のJSONファイルを選択してください。",
+    changedBeforeRestore:
+      "確認中に保存データが更新されました。変更件数を確認し、もう一度実行してください。",
+    changedBeforeDelete:
+      "確認中に保存データが更新されました。削除対象を確認し、もう一度実行してください。",
+    corruptStorage:
+      "保存データを読み込めませんでした。元のデータは変更していません。「データの保存」から書き出し、または復元してください。",
+    storageUnavailable:
+      "ブラウザの保存領域を利用できません。設定でサイトデータの保存を許可してください。",
+    save: "保存できませんでした。保存容量やブラウザの設定を確認してください。変更は保存されていません。",
   },
   dateTime: {
     headerDate: (d: Date) =>
@@ -318,6 +279,14 @@ export const messages = {
       "分" +
       pad(d.getSeconds()) +
       "秒",
-    deadline: (d: Date, withYear: boolean) => formatDeadline(d, withYear),
+    deadline: (d: Date, withYear: boolean) =>
+      (withYear ? d.getFullYear() + "年" : "") +
+      (d.getMonth() + 1) +
+      "月" +
+      d.getDate() +
+      "日 " +
+      pad(d.getHours()) +
+      ":" +
+      pad(d.getMinutes()),
   },
 } as const;

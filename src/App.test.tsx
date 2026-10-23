@@ -12,210 +12,11 @@ import {
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { messages } from "./messages";
-import type { Todo, TodoDraft } from "./model";
-
-const session = { token: "token-1", userId: "me", name: "自分" };
-const defaultUsers = [
-  { id: "me", name: "自分", createdAt: "2026-10-01T00:00:00.000Z" },
-  { id: "other", name: "佐藤", createdAt: "2026-10-01T00:00:00.000Z" },
-];
-
-const ctrl = vi.hoisted(() => {
-  const listeners = new Set<() => void>();
-  return {
-    board: null as unknown,
-    boot: { token: null as string | null, session: null as unknown },
-    sessionArg: null as unknown,
-    writes: [] as unknown[],
-    listeners,
-    notify() {
-      listeners.forEach((listener) => listener());
-    },
-  };
-});
-
-vi.mock("./cloud/session", () => ({
-  resolveSession: () => ctrl.boot,
-  writeSession: (value: unknown) => {
-    ctrl.writes.push(value);
-  },
-}));
-
-vi.mock("./cloud/useBoard", async () => {
-  const { useSyncExternalStore } = await import("react");
-  return {
-    useBoard: (nextSession: unknown) => {
-      ctrl.sessionArg = nextSession;
-      useSyncExternalStore(
-        (listener: () => void) => {
-          ctrl.listeners.add(listener);
-          return () => ctrl.listeners.delete(listener);
-        },
-        () => ctrl.board,
-      );
-      return nextSession === null ? { phase: "login" } : ctrl.board;
-    },
-  };
-});
-
-vi.mock("./screens/LoginScreen", async () => {
-  const { jsx } = await import("react/jsx-runtime");
-  return {
-    LoginScreen: ({
-      prefillToken,
-      onJoined,
-    }: {
-      prefillToken: string | null;
-      onJoined: (value: unknown) => void;
-    }) =>
-      jsx("div", {
-        children: [
-          jsx("h1", { children: "ログイン画面" }, "title"),
-          jsx(
-            "p",
-            { "data-testid": "prefill", children: prefillToken ?? "none" },
-            "prefill",
-          ),
-          jsx(
-            "button",
-            {
-              type: "button",
-              onClick: () =>
-                onJoined({
-                  token: "joined",
-                  userId: "joined-user",
-                  name: "参加者",
-                }),
-              children: "参加する",
-            },
-            "join",
-          ),
-        ],
-      }),
-  };
-});
-
-const task = (extra: Partial<Todo> = {}): Todo => ({
-  id: "task",
-  title: "授業の課題",
-  description: "TODOアプリを作る",
-  deadline: "2026-10-30T10:00:00.000Z",
-  priority: "high",
-  status: "doing",
-  assigneeId: null,
-  createdAt: "2026-10-18T00:00:00.000Z",
-  updatedAt: "2026-10-18T00:00:00.000Z",
-  notes: [],
-  ...extra,
-});
-
-let board: any;
-let undoStore = new Map<string, Todo>();
-
-function commit(next: Todo[]) {
-  board = { ...board, state: { ...board.state, todos: next } };
-  ctrl.board = board;
-  ctrl.notify();
-}
-
-function setBoard(next: unknown) {
-  board = next;
-  ctrl.board = next;
-  ctrl.notify();
-}
-
-function setTodos(next: Todo[]) {
-  commit(next);
-}
-
-function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
-  undoStore = new Map();
-  let sequence = 0;
-  const timestamp = "2026-10-20T00:00:00.000Z";
-  board = {
-    phase: "ready",
-    state: {
-      list: { id: "list", title: "共有リスト", revision: 1 },
-      users: defaultUsers,
-      todos,
-      activities: [],
-    },
-    me: session,
-    refresh: vi.fn(),
-    addTodo: vi.fn(async (draft: TodoDraft) => {
-      sequence += 1;
-      commit([
-        ...board.state.todos,
-        {
-          ...draft,
-          id: "created-" + sequence,
-          notes: [],
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        },
-      ]);
-    }),
-    updateTodo: vi.fn(async (id: string, patch: Partial<TodoDraft>) => {
-      commit(
-        board.state.todos.map((todo: Todo) =>
-          todo.id === id ? { ...todo, ...patch, updatedAt: timestamp } : todo,
-        ),
-      );
-    }),
-    removeTodo: vi.fn(async (id: string) => {
-      const found = board.state.todos.find((todo: Todo) => todo.id === id);
-      if (found) undoStore.set(id, found);
-      commit(board.state.todos.filter((todo: Todo) => todo.id !== id));
-    }),
-    undoRemove: vi.fn(async (id: string) => {
-      const found = undoStore.get(id);
-      if (found && !board.state.todos.some((todo: Todo) => todo.id === id))
-        commit([...board.state.todos, found]);
-    }),
-    addMemo: vi.fn(async (todoId: string, body: string) => {
-      sequence += 1;
-      commit(
-        board.state.todos.map((todo: Todo) =>
-          todo.id === todoId
-            ? {
-                ...todo,
-                notes: [
-                  ...todo.notes,
-                  {
-                    id: "memo-" + sequence,
-                    text: body,
-                    createdAt: timestamp,
-                    userId: session.userId,
-                  },
-                ],
-                updatedAt: timestamp,
-              }
-            : todo,
-        ),
-      );
-    }),
-    setAssignee: vi.fn(async (id: string, assigneeId: string | null) => {
-      commit(
-        board.state.todos.map((todo: Todo) =>
-          todo.id === id ? { ...todo, assigneeId, updatedAt: timestamp } : todo,
-        ),
-      );
-    }),
-    renameBoard: vi.fn(async () => {}),
-    removeBoard: vi.fn(async () => {}),
-    renameMember: vi.fn(async () => {}),
-    removeMember: vi.fn(async () => {}),
-    ...overrides,
-  };
-  ctrl.board = board;
-  ctrl.notify();
-  return board;
-}
+import { parseTodos, serializeTodos, STORAGE_KEY } from "./model";
+import type { Todo } from "./model";
 
 beforeEach(() => {
   localStorage.clear();
-  ctrl.writes.length = 0;
-  ctrl.boot = { token: null, session };
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
     configurable: true,
     value() {
@@ -230,7 +31,6 @@ beforeEach(() => {
   });
   Element.prototype.scrollIntoView = vi.fn();
   Element.prototype.scrollTo = vi.fn();
-  ready([]);
 });
 afterEach(() => {
   cleanup();
@@ -241,18 +41,12 @@ afterEach(() => {
 
 describe("一覧の表示形式", () => {
   it("簡潔表示は必要な項目だけを表示し、検索・並び順を維持して詳細を開く。表示形式を再読み込み後も保つ", async () => {
-    ready([
-      task({
-        notes: [
-          {
-            id: "memo",
-            text: "一覧には不要な進捗メモ",
-            createdAt: "2026-10-18T00:00:00.000Z",
-            userId: "me",
-          },
-        ],
-      }),
-    ]);
+    const t = task();
+    t.notes = [
+      { id: "memo", text: "一覧には不要な進捗メモ", createdAt: t.createdAt },
+    ];
+    localStorage.setItem(STORAGE_KEY, serializeTodos([t]));
+    const original = localStorage.getItem(STORAGE_KEY);
     const user = userEvent.setup();
     const mounted = render(<App />);
     await user.type(
@@ -286,6 +80,7 @@ describe("一覧の表示形式", () => {
     await user.click(
       screen.getByRole("button", { name: messages.common.close }),
     );
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(original);
     mounted.unmount();
     render(<App />);
     expect(
@@ -311,33 +106,92 @@ describe("メモの表示演出", () => {
       })),
     );
   }
-  it("送信したメモが点から本文へ変わり、失敗時は入力を残す", async () => {
+  function send(text: string) {
+    fireEvent.change(screen.getByLabelText("メモを入力"), {
+      target: { value: text },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+  }
+  it("保存は即時に完了し、連続送信した各メモがそれぞれ点から本文へ変わる。途中で閉じても保存済みメモは残る", () => {
     vi.useFakeTimers();
     motion(false);
-    ready([task()]);
+    seed();
+    const mounted = render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    send("最初のメモ");
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes[0].text,
+    ).toBe("最初のメモ");
+    act(() => vi.advanceTimersByTime(200));
+    send("次のメモ");
+    expect(
+      screen.getAllByRole("status", { name: "メモを表示中" }),
+    ).toHaveLength(2);
+    const thread = () =>
+      within(screen.getByRole("list", { name: "メモの履歴" }));
+    const firstBody = thread()
+      .getByText("最初のメモ")
+      .closest(".message-reveal");
+    expect(firstBody?.getAttribute("aria-hidden")).toBe("true");
+    act(() => vi.advanceTimersByTime(220));
+    expect(thread().getByText("最初のメモ")).toBeTruthy();
+    expect(thread().getByText("最初のメモ").closest(".message-reveal")).toBe(
+      firstBody,
+    );
+    expect(firstBody?.getAttribute("aria-hidden")).toBeNull();
+    expect(
+      screen.getAllByRole("status", { name: "メモを表示中" }),
+    ).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(200));
+    expect(thread().getByText("次のメモ")).toBeTruthy();
+    send("演出中に閉じたメモ");
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    mounted.unmount();
     render(<App />);
     fireEvent.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    fireEvent.change(screen.getByLabelText("メモを入力"), {
-      target: { value: "最初のメモ" },
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "送信" }));
-    });
-    expect(board.addMemo).toHaveBeenCalledWith("task", "最初のメモ");
+    expect(thread().getByText("演出中に閉じたメモ")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
+  });
+  it("端末の動きを減らす設定より、明示的に選んだメモの演出を優先する", () => {
+    vi.useFakeTimers();
+    motion(true);
+    seed();
+    render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    send("演出を優先するメモ");
     expect(screen.getByRole("status", { name: "メモを表示中" })).toBeTruthy();
-    await act(async () => {
-      vi.advanceTimersByTime(420);
-    });
+    const body = within(screen.getByRole("list", { name: "メモの履歴" }))
+      .getByText("演出を優先するメモ")
+      .closest(".message-reveal");
+    expect(body?.getAttribute("aria-hidden")).toBe("true");
+    act(() => vi.advanceTimersByTime(420));
+    expect(body?.getAttribute("aria-hidden")).toBeNull();
     expect(
-      within(
-        screen.getByRole("list", { name: messages.activity.heading }),
-      ).getByText("最初のメモ"),
+      within(screen.getByRole("list", { name: "メモの履歴" })).getByText(
+        "演出を優先するメモ",
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole("status", { name: "メモを表示中" })).toBeNull();
   });
 });
+const task = (): Todo => ({
+  id: "task",
+  title: "授業の課題",
+  description: "TODOアプリを作る",
+  deadline: "2026-10-30T10:00:00.000Z",
+  priority: "high",
+  status: "doing",
+  createdAt: "2026-10-18T00:00:00.000Z",
+  updatedAt: "2026-10-18T00:00:00.000Z",
+  notes: [],
+});
+const seed = () => localStorage.setItem(STORAGE_KEY, serializeTodos([task()]));
 
 describe("利用者の操作", () => {
   it("優先度は左から低・中・高の順で選べて、選んだ値で保存する", async () => {
@@ -362,12 +216,12 @@ describe("利用者の操作", () => {
         name: "TODOを作成",
       }),
     );
-    await waitFor(() => expect(board.addTodo).toHaveBeenCalledTimes(1));
-    expect(board.addTodo.mock.calls[0][0].priority).toBe("low");
-    expect(board.state.todos[0].priority).toBe("low");
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].priority).toBe(
+      "low",
+    );
   });
   it("送信ボタンは入力欄へフォーカスを戻さず、キーボードショートカットは入力を続けられる", async () => {
-    ready([task()]);
+    seed();
     const user = userEvent.setup();
     render(<App />);
     await user.click(
@@ -377,15 +231,14 @@ describe("利用者の操作", () => {
     await user.type(input, "ボタンから送信");
     await user.click(screen.getByRole("button", { name: "送信" }));
     expect(document.activeElement).not.toBe(input);
-    await waitFor(() => expect(board.addMemo).toHaveBeenCalledTimes(1));
     await user.type(input, "キーボードから送信");
     await user.keyboard("{Control>}{Enter}{/Control}");
     expect(document.activeElement).toBe(input);
-    await waitFor(() => expect(board.addMemo).toHaveBeenCalledTimes(2));
-    expect(board.addMemo.mock.calls.map((call: unknown[]) => call[1])).toEqual([
-      "ボタンから送信",
-      "キーボードから送信",
-    ]);
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes.map(
+        (n) => n.text,
+      ),
+    ).toEqual(["ボタンから送信", "キーボードから送信"]);
   });
   it("期限なしの作成前に確認し、戻れば保存せず、承認後だけ作成する", async () => {
     const user = userEvent.setup();
@@ -399,7 +252,7 @@ describe("利用者の操作", () => {
       }),
     );
     let warning = screen.getByRole("alertdialog");
-    expect(board.addTodo).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     await user.click(
       within(warning).getByRole("button", { name: "期限を設定する" }),
     );
@@ -423,16 +276,19 @@ describe("利用者の操作", () => {
     await user.click(
       within(warning).getByRole("button", { name: "期限なしで作成" }),
     );
-    await waitFor(() => expect(board.addTodo).toHaveBeenCalledTimes(1));
-    expect(board.addTodo.mock.calls[0][0].deadline).toBeNull();
+    const saved = parseTodos(localStorage.getItem(STORAGE_KEY)!);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].deadline).toBeNull();
     expect(
-      screen.getByRole("button", { name: "本を読むの詳細を開く" }),
+      within(screen.getByRole("dialog")).getByRole("heading", {
+        name: "本を読む",
+      }),
     ).toBeTruthy();
     expect(
       screen.queryByRole("link", { name: /Googleカレンダーに登録/ }),
     ).toBeNull();
   });
-  it("期限を持つTODOを作成し、詳細で登録用リンクを表示する", async () => {
+  it("期限を持つTODOを作成し、登録用リンクを表示する", async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: "新しいTODO" }));
@@ -446,23 +302,17 @@ describe("利用者の操作", () => {
       }),
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "レポートを提出の詳細を開く" }),
-      ).toBeTruthy(),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "レポートを提出の詳細を開く" }),
-    );
     const link = screen.getByRole("link", { name: /Googleカレンダーに登録/ });
     expect(link.getAttribute("target")).toBe("_blank");
     expect(new URL(link.getAttribute("href")!).searchParams.get("text")).toBe(
       "【締切】レポートを提出",
     );
-    expect(board.addTodo.mock.calls[0][0].deadline).not.toBeNull();
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].deadline,
+    ).not.toBeNull();
   });
-  it("メモをチャットとして追記し、名前・送信日時とともに残す。編集・削除操作はない", async () => {
-    ready([task()]);
+  it("メモをチャットとして追記し、名前・送信日時とともに永続化する。編集・削除操作はない", async () => {
+    seed();
     const user = userEvent.setup();
     const initial = render(<App />);
     await user.click(
@@ -475,35 +325,34 @@ describe("利用者の操作", () => {
     );
     await user.type(input, "一覧画面までできた");
     await user.click(screen.getByRole("button", { name: "送信" }));
-    await waitFor(() => expect(input).toHaveProperty("value", ""));
+    expect(input).toHaveProperty("value", "");
     await user.type(input, "モーダルも完成");
     await user.keyboard("{Control>}{Enter}{/Control}");
-    await waitFor(() =>
-      expect(
-        board.state.todos[0].notes.map((note: { text: string }) => note.text),
-      ).toEqual(["一覧画面までできた", "モーダルも完成"]),
-    );
+    const stored = parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes;
+    expect(stored.map((n) => n.text)).toEqual([
+      "一覧画面までできた",
+      "モーダルも完成",
+    ]);
     initial.unmount();
     render(<App />);
     await user.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
-    const thread = screen.getByRole("list", {
-      name: messages.activity.heading,
-    });
-    const items = within(thread).getAllByRole("listitem");
-    expect(items).toHaveLength(2);
-    for (let i = 0; i < items.length; i++) {
-      expect(within(items[i]).getByText("自分")).toBeTruthy();
-      expect(
-        items[i].querySelector("time")?.getAttribute("dateTime"),
-      ).toBeTruthy();
+    const thread = screen.getByRole("list", { name: "メモの履歴" });
+    const messages = within(thread).getAllByRole("listitem");
+    expect(messages).toHaveLength(2);
+    for (let i = 0; i < messages.length; i++) {
+      expect(within(messages[i]).getByText("自分")).toBeTruthy();
+      expect(messages[i].querySelector("time")?.getAttribute("dateTime")).toBe(
+        stored[i].createdAt,
+      );
+      expect(within(messages[i]).getByText(stored[i].text)).toBeTruthy();
     }
     expect(screen.queryByRole("button", { name: "メモを編集" })).toBeNull();
     expect(screen.queryByRole("button", { name: "メモを削除" })).toBeNull();
   });
   it("未送信メモを閉じる前に確認し、入力を続けられる", async () => {
-    ready([task()]);
+    seed();
     const user = userEvent.setup();
     render(<App />);
     await user.click(
@@ -523,10 +372,15 @@ describe("利用者の操作", () => {
       "value",
       "送信前のメモ",
     );
-    expect(board.addMemo).not.toHaveBeenCalled();
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes,
+    ).toHaveLength(0);
   });
   it("期限なしの場合はカレンダー操作から期限の編集へ進める", async () => {
-    ready([task({ deadline: null })]);
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeTodos([{ ...task(), deadline: null }]),
+    );
     const user = userEvent.setup();
     render(<App />);
     await user.click(
@@ -581,12 +435,10 @@ describe("利用者の操作", () => {
       }),
     );
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(board.addTodo).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
   it("保存失敗時はメモ入力を消さず、成功したと表示しない", async () => {
-    ready([task()], {
-      addMemo: vi.fn().mockRejectedValue(new Error("offline")),
-    });
+    seed();
     const user = userEvent.setup();
     render(<App />);
     await user.click(
@@ -596,270 +448,58 @@ describe("利用者の操作", () => {
       screen.getByLabelText("メモを入力"),
       "保存できないときも残る",
     );
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
     await user.click(screen.getByRole("button", { name: "送信" }));
-    await waitFor(() =>
-      expect(screen.getByLabelText("メモを入力")).toHaveProperty(
-        "value",
-        "保存できないときも残る",
-      ),
+    expect(screen.getByLabelText("メモを入力")).toHaveProperty(
+      "value",
+      "保存できないときも残る",
     );
     expect(
       within(screen.getByRole("dialog")).getByRole("alert").textContent,
-    ).toContain(messages.errors.api.general);
-    expect(screen.queryByText(messages.chat.sent)).toBeNull();
-    expect(board.state.todos[0].notes).toHaveLength(0);
+    ).toContain("保存できませんでした");
+    expect(screen.queryByText("送信しました")).toBeNull();
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes,
+    ).toHaveLength(0);
   });
-  it("削除の確認後に削除し、取り消すと復元を呼ぶ", async () => {
-    ready([
-      task({
-        notes: [
-          {
-            id: "note",
-            text: "残すメモ",
-            createdAt: "2026-10-18T00:00:00.000Z",
-            userId: "me",
-          },
-        ],
-      }),
-    ]);
+  it("削除の確認後に削除し、取り消すとメモも復元する", async () => {
+    const t = task();
+    t.notes = [{ id: "note", text: "残すメモ", createdAt: t.createdAt }];
+    localStorage.setItem(STORAGE_KEY, serializeTodos([t]));
     const user = userEvent.setup();
     render(<App />);
     await user.click(
       screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
     );
     await user.click(screen.getByRole("button", { name: "TODOを削除" }));
-    expect(board.removeTodo).not.toHaveBeenCalled();
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)).toHaveLength(1);
     await user.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
         name: "TODOを削除",
       }),
     );
-    await waitFor(() => expect(board.removeTodo).toHaveBeenCalledWith("task"));
-    expect(board.state.todos).toHaveLength(0);
+    expect(parseTodos(localStorage.getItem(STORAGE_KEY)!)).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "元に戻す" }));
-    await waitFor(() => expect(board.undoRemove).toHaveBeenCalledWith("task"));
-    expect(board.state.todos[0].notes[0].text).toBe("残すメモ");
-    expect(screen.getByText(messages.todo.restored)).toBeTruthy();
+    expect(
+      parseTodos(localStorage.getItem(STORAGE_KEY)!)[0].notes[0].text,
+    ).toBe("残すメモ");
   });
-  it("担当者の絞り込みが効き、カードに名前を表示する。削除済みは不明と表示する", async () => {
-    ready([
-      task({ id: "mine", title: "自分の課題", assigneeId: "me" }),
-      task({ id: "other", title: "佐藤の課題", assigneeId: "other" }),
-      task({ id: "none", title: "未割当の課題", assigneeId: null }),
-      task({ id: "ghost", title: "削除済みの課題", assigneeId: "ghost" }),
-    ]);
-    const user = userEvent.setup();
+  it("壊れた保存データは自動で上書きせず復元を案内する", () => {
+    localStorage.setItem(STORAGE_KEY, "broken");
     render(<App />);
-    expect(
-      within(
-        screen.getByRole("button", { name: "自分の課題の詳細を開く" }),
-      ).getByText("自分"),
-    ).toBeTruthy();
-    expect(
-      within(
-        screen.getByRole("button", { name: "削除済みの課題の詳細を開く" }),
-      ).getByText(messages.todo.assigneeUnknown),
-    ).toBeTruthy();
-    await user.selectOptions(screen.getByLabelText("担当者"), "other");
-    expect(
-      screen.queryByRole("button", { name: "自分の課題の詳細を開く" }),
-    ).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "佐藤の課題の詳細を開く" }),
-    ).toBeTruthy();
-    await user.selectOptions(screen.getByLabelText("担当者"), "none");
-    expect(
-      screen.getByRole("button", { name: "未割当の課題の詳細を開く" }),
-    ).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "佐藤の課題の詳細を開く" }),
-    ).toBeNull();
-    await user.selectOptions(screen.getByLabelText("担当者"), "any");
-    expect(
-      screen.getAllByRole("button", { name: /の詳細を開く$/ }),
-    ).toHaveLength(4);
-  });
-  it("作成時に担当者を選ぶとその担当者で保存する", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole("button", { name: "新しいTODO" }));
-    await user.type(screen.getByLabelText(/^タイトル/), "担当者付きの課題");
-    fireEvent.change(screen.getByLabelText("期限"), {
-      target: { value: "2026-10-30T23:59" },
-    });
-    await user.selectOptions(
-      within(screen.getByRole("dialog")).getByLabelText("担当者"),
-      "other",
-    );
-    await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "TODOを作成",
-      }),
-    );
-    await waitFor(() => expect(board.addTodo).toHaveBeenCalledTimes(1));
-    expect(board.addTodo.mock.calls[0][0].assigneeId).toBe("other");
-    expect(
-      within(
-        screen.getByRole("button", {
-          name: "担当者付きの課題の詳細を開く",
-        }),
-      ).getByText("佐藤"),
-    ).toBeTruthy();
-  });
-  it("詳細を開いたままボードからTODOが消えたらモーダルを閉じる", async () => {
-    ready([task()]);
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(
-      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
-    );
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    act(() => setTodos([]));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-});
-
-describe("編集の保存経路", () => {
-  async function openEdit(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(
-      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
-    );
-    await user.click(screen.getByRole("button", { name: messages.todo.edit }));
-    await waitFor(() =>
-      expect(screen.getByLabelText(/^タイトル/)).toBeTruthy(),
-    );
-    return screen.getByRole("dialog");
-  }
-
-  it("変更した項目だけを updateTodo に渡し、保存後は詳細へ戻って通知する", async () => {
-    ready([task()]);
-    const user = userEvent.setup();
-    render(<App />);
-    const dialog = await openEdit(user);
-    const title = within(dialog).getByLabelText(/^タイトル/);
-    await user.clear(title);
-    await user.type(title, "授業の課題（改）");
-    const description = within(dialog).getByLabelText(/^説明/);
-    await user.clear(description);
-    await user.type(description, "クラウド同期を確認する");
-    await user.click(
-      within(dialog).getByRole("button", { name: messages.todo.save }),
-    );
-    await waitFor(() => expect(board.updateTodo).toHaveBeenCalledTimes(1));
-    expect(board.updateTodo).toHaveBeenCalledWith("task", {
-      title: "授業の課題（改）",
-      description: "クラウド同期を確認する",
-    });
-    expect(board.setAssignee).not.toHaveBeenCalled();
-    const detail = screen.getByRole("dialog");
-    expect(
-      within(detail).getByRole("heading", { name: "授業の課題（改）" }),
-    ).toBeTruthy();
-    expect(screen.queryByLabelText(/^タイトル/)).toBeNull();
-    expect(within(detail).getByText(messages.todo.saved)).toBeTruthy();
-  });
-
-  it("担当者だけを変えたときは setAssignee を呼び、updateTodo は呼ばない", async () => {
-    ready([task()]);
-    const user = userEvent.setup();
-    render(<App />);
-    const dialog = await openEdit(user);
-    await user.selectOptions(
-      within(dialog).getByLabelText(messages.todo.assignee),
-      "other",
-    );
-    await user.click(
-      within(dialog).getByRole("button", { name: messages.todo.save }),
-    );
-    await waitFor(() =>
-      expect(board.setAssignee).toHaveBeenCalledWith("task", "other"),
-    );
-    expect(board.setAssignee).toHaveBeenCalledTimes(1);
-    expect(board.updateTodo).not.toHaveBeenCalled();
-    const detail = screen.getByRole("dialog");
-    expect(
-      within(detail).getByRole("heading", { name: "授業の課題" }),
-    ).toBeTruthy();
-    expect(within(detail).getByText(messages.todo.saved)).toBeTruthy();
-  });
-
-  it("保存に失敗したら入力を残してエラーを表示し、詳細へ戻らない", async () => {
-    ready([task()], {
-      updateTodo: vi.fn().mockRejectedValue(new Error("offline")),
-    });
-    const user = userEvent.setup();
-    render(<App />);
-    const dialog = await openEdit(user);
-    const title = within(dialog).getByLabelText(/^タイトル/);
-    await user.clear(title);
-    await user.type(title, "保存できない題名");
-    await user.click(
-      within(dialog).getByRole("button", { name: messages.todo.save }),
-    );
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole("dialog")).getByRole("alert").textContent,
-      ).toContain(messages.errors.api.general),
-    );
-    expect(board.updateTodo).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText(/^タイトル/)).toHaveProperty(
-      "value",
-      "保存できない題名",
-    );
-    expect(
-      screen.getByRole("heading", { name: messages.todo.edit }),
-    ).toBeTruthy();
-    expect(screen.queryByText(messages.todo.saved)).toBeNull();
-  });
-});
-
-describe("接続状態", () => {
-  it("セッションがないときは参加画面へトークンを渡す", async () => {
-    ctrl.boot = { token: "invite-token", session: null };
-    setBoard({ phase: "login" });
-    const user = userEvent.setup();
-    render(<App />);
-    expect(screen.getByRole("heading", { name: "ログイン画面" })).toBeTruthy();
-    expect(screen.getByTestId("prefill").textContent).toBe("invite-token");
-    await user.click(screen.getByRole("button", { name: "参加する" }));
-    expect(ctrl.writes).toContainEqual({
-      token: "joined",
-      userId: "joined-user",
-      name: "参加者",
-    });
-    expect(screen.getByTestId("prefill").textContent).toBe("none");
-  });
-  it("別リストの招待トークンはログイン中でも参加画面を開く", () => {
-    ctrl.boot = { token: "t-other", session };
-    render(<App />);
-    expect(screen.getByRole("heading", { name: "ログイン画面" })).toBeTruthy();
-    expect(screen.getByTestId("prefill").textContent).toBe("t-other");
-    expect(ctrl.sessionArg).toBeNull();
-  });
-  it("読み込み中は待機表示を出す", () => {
-    setBoard({ phase: "loading" });
-    render(<App />);
-    expect(screen.getByRole("status").textContent).toContain(
-      messages.board.loading,
-    );
-  });
-  it("読み込み失敗時は再試行できる", async () => {
-    const refresh = vi.fn();
-    setBoard({
-      phase: "error",
-      message: messages.errors.api.general,
-      retryable: true,
-      refresh,
-    });
-    const user = userEvent.setup();
-    render(<App />);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("broken");
     expect(screen.getByRole("alert").textContent).toContain(
-      messages.errors.api.general,
+      "元のデータは変更していません",
     );
-    await user.click(
-      screen.getByRole("button", { name: messages.common.retry }),
+    expect(screen.getByRole("button", { name: "新しいTODO" })).toHaveProperty(
+      "disabled",
+      true,
     );
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("button", { name: /データの保存・復元を開く/ }),
+    ).toBeTruthy();
   });
 });
 
@@ -867,18 +507,21 @@ describe("期限超過メニュー", () => {
   it("すべてのTODOと未完了の間に表示し、件数と表示対象を未完了の期限超過に絞る", async () => {
     const past = new Date(Date.now() - 60000).toISOString();
     const future = new Date(Date.now() + 3600000).toISOString();
-    ready([
-      { ...task(), id: "expired", title: "期限超過の課題", deadline: past },
-      {
-        ...task(),
-        id: "finished",
-        title: "完了済みの課題",
-        deadline: past,
-        status: "done",
-      },
-      { ...task(), id: "none", title: "期限なしの課題", deadline: null },
-      { ...task(), id: "later", title: "これからの課題", deadline: future },
-    ]);
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeTodos([
+        { ...task(), id: "expired", title: "期限超過の課題", deadline: past },
+        {
+          ...task(),
+          id: "finished",
+          title: "完了済みの課題",
+          deadline: past,
+          status: "done",
+        },
+        { ...task(), id: "none", title: "期限なしの課題", deadline: null },
+        { ...task(), id: "later", title: "これからの課題", deadline: future },
+      ]),
+    );
     const user = userEvent.setup();
     render(<App />);
     const nav = within(screen.getByRole("navigation", { name: "TODOの表示" }));
@@ -919,7 +562,7 @@ describe("直近の期限の表示", () => {
       priority: "high" as const,
       deadline: new Date(current + 7200000).toISOString(),
     };
-    ready([soon, later]);
+    localStorage.setItem(STORAGE_KEY, serializeTodos([soon, later]));
     const user = userEvent.setup();
     render(<App />);
     const soonButton = () =>
@@ -944,32 +587,5 @@ describe("直近の期限の表示", () => {
       }),
     ).toBeNull();
     expect(laterButton().getAttribute("aria-description")).toBe("直近の期限");
-  });
-});
-
-describe("管理画面", () => {
-  it("導線から開き、メンバー名の変更を board に渡す", async () => {
-    ready([task()]);
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(
-      within(document.querySelector(".sidebar") as HTMLElement).getByRole(
-        "button",
-        { name: messages.manage.title },
-      ),
-    );
-    const input = screen.getByRole("textbox", {
-      name: messages.manage.memberNameLabel("佐藤"),
-    });
-    await user.clear(input);
-    await user.type(input, "佐藤（改）");
-    await user.click(
-      within(input.closest("form") as HTMLElement).getByRole("button", {
-        name: messages.manage.save,
-      }),
-    );
-    await waitFor(() =>
-      expect(board.renameMember).toHaveBeenCalledWith("other", "佐藤（改）"),
-    );
   });
 });

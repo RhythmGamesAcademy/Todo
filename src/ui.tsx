@@ -1,5 +1,5 @@
 import { messages } from "./messages";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   AlertCircle,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import {
   calendarUrl,
+  clockText,
   dateText,
   isOverdue,
   isToday,
@@ -26,9 +27,7 @@ import {
   STATUS,
   toDateInput,
 } from "./model";
-import type { Priority, Status, Todo, TodoDraft } from "./model";
-import type { Activity, CloudUser, TodoPatch } from "./cloud/types";
-import { computeEntries, Timeline } from "./screens/Timeline";
+import type { Note, Priority, Status, Todo, TodoDraft } from "./model";
 export function Mark() {
   return (
     <img
@@ -110,26 +109,18 @@ export function Modal({
 export function TodoCard({
   todo,
   now,
-  users,
   onOpen,
   nextDue = false,
   compact = false,
 }: {
   todo: Todo;
   now: Date;
-  users: CloudUser[];
   onOpen: () => void;
   nextDue?: boolean;
   compact?: boolean;
 }) {
   const overdue = isOverdue(todo, now);
   const latest = todo.notes.at(-1);
-  const assignee = todo.assigneeId
-    ? users.find((user) => user.id === todo.assigneeId)
-    : undefined;
-  const assigneeName = todo.assigneeId
-    ? (assignee?.name ?? messages.todo.assigneeUnknown)
-    : null;
   return (
     <button
       className={
@@ -155,17 +146,9 @@ export function TodoCard({
             {STATUS[todo.status]}
           </span>
         )}
-        <span className="card-tags">
-          {assigneeName && (
-            <span className="assignee">
-              <UserRound size={13} />
-              {assigneeName}
-            </span>
-          )}
-          <span className={"priority priority-" + todo.priority}>
-            <Flag size={13} />
-            {messages.todo.priorityLabel(PRIORITY[todo.priority])}
-          </span>
+        <span className={"priority priority-" + todo.priority}>
+          <Flag size={13} />
+          {messages.todo.priorityLabel(PRIORITY[todo.priority])}
         </span>
       </div>
       <div className="card-summary">
@@ -219,7 +202,6 @@ export function TodoCard({
 }
 export function TodoForm({
   todo,
-  users,
   setDeadline: focusDeadline = false,
   onSave,
   onCancel,
@@ -227,9 +209,8 @@ export function TodoForm({
   ask,
 }: {
   todo?: Todo;
-  users: CloudUser[];
   setDeadline?: boolean;
-  onSave: (draft: TodoDraft) => Promise<boolean>;
+  onSave: (draft: TodoDraft) => boolean;
   onCancel: () => void;
   onDirty: (dirty: boolean) => void;
   ask: (options: AskOptions) => Promise<boolean>;
@@ -246,21 +227,14 @@ export function TodoForm({
     todo?.priority ?? "medium",
   );
   const [status, setStatus] = useState<Status>(todo?.status ?? "todo");
-  const [assigneeId, setAssigneeId] = useState<string | null>(
-    todo?.assigneeId ?? null,
-  );
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const assigneeMissing =
-    assigneeId !== null && !users.some((user) => user.id === assigneeId);
   const dirty =
     title !== (todo?.title ?? "") ||
     description !== (todo?.description ?? "") ||
     noDeadline !== (todo ? todo.deadline === null : false) ||
     deadline !== (todo?.deadline ? toDateInput(todo.deadline) : "") ||
     priority !== (todo?.priority ?? "medium") ||
-    status !== (todo?.status ?? "todo") ||
-    assigneeId !== (todo?.assigneeId ?? null);
+    status !== (todo?.status ?? "todo");
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
@@ -301,19 +275,13 @@ export function TodoForm({
         return;
       }
     }
-    setSaving(true);
-    try {
-      await onSave({
-        title: title.trim(),
-        description: description.trim(),
-        deadline: deadlineIso,
-        priority,
-        status,
-        assigneeId,
-      });
-    } finally {
-      setSaving(false);
-    }
+    onSave({
+      title: title.trim(),
+      description: description.trim(),
+      deadline: deadlineIso,
+      priority,
+      status,
+    });
   }
   return (
     <form onSubmit={submit} className="todo-form">
@@ -412,25 +380,6 @@ export function TodoForm({
           ))}
         </div>
       </fieldset>
-      <label className="field-label" htmlFor="todo-assignee">
-        {messages.todo.assignee}
-      </label>
-      <select
-        id="todo-assignee"
-        className="field"
-        value={assigneeId ?? ""}
-        onChange={(e) => setAssigneeId(e.target.value || null)}
-      >
-        <option value="">{messages.filters.assignment.none}</option>
-        {assigneeMissing && assigneeId && (
-          <option value={assigneeId}>{messages.todo.assigneeUnknown}</option>
-        )}
-        {users.map((user) => (
-          <option key={user.id} value={user.id}>
-            {user.name}
-          </option>
-        ))}
-      </select>
       {todo && (
         <>
           <label className="field-label" htmlFor="edit-status">
@@ -464,11 +413,7 @@ export function TodoForm({
         >
           {messages.common.cancel}
         </button>
-        <button
-          type="submit"
-          className="button button-primary"
-          disabled={saving}
-        >
+        <button type="submit" className="button button-primary">
           {todo ? <Check size={18} /> : <Plus size={18} />}{" "}
           {todo ? messages.todo.save : messages.todo.createAction}
         </button>
@@ -483,73 +428,149 @@ export interface AskOptions {
   cancel?: string;
   danger?: boolean;
 }
+function ChatMessage({ note, enter }: { note: Note; enter: boolean }) {
+  const [pending, setPending] = useState(enter);
+  const row = useRef<HTMLLIElement>(null);
+  const followReveal = useRef(false);
+  useEffect(() => {
+    if (!pending) {
+      if (followReveal.current) {
+        const list = row.current?.closest("ol");
+        if (!list || !row.current) return;
+        // Keep the unfolding text in view, but stop following if the reader scrolls.
+        const follow = () => {
+          if (followReveal.current)
+            list.scrollTo({ top: list.scrollHeight, behavior: "auto" });
+        };
+        const stop = () => {
+          followReveal.current = false;
+        };
+        const observer =
+          typeof ResizeObserver === "undefined"
+            ? null
+            : new ResizeObserver(follow);
+        observer?.observe(row.current);
+        list.addEventListener("wheel", stop, { passive: true });
+        list.addEventListener("touchstart", stop, { passive: true });
+        list.addEventListener("keydown", stop);
+        follow();
+        const timer = window.setTimeout(() => {
+          observer?.disconnect();
+          stop();
+        }, 520);
+        return () => {
+          window.clearTimeout(timer);
+          observer?.disconnect();
+          list.removeEventListener("wheel", stop);
+          list.removeEventListener("touchstart", stop);
+          list.removeEventListener("keydown", stop);
+        };
+      }
+      return;
+    }
+    function reveal() {
+      const list = row.current?.closest("ol");
+      followReveal.current =
+        !!list && list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+      setPending(false);
+    }
+    const timer = window.setTimeout(reveal, 420);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [pending]);
+  return (
+    <li
+      ref={row}
+      className={"chat-message " + (enter ? "chat-message-new" : "")}
+    >
+      <span className="avatar" aria-hidden="true">
+        <UserRound size={21} strokeWidth={1.7} />
+      </span>
+      <div className="message-content">
+        <span className="message-name">{messages.chat.self}</span>
+        <time className="message-time" dateTime={note.createdAt}>
+          {clockText(new Date(note.createdAt))}
+        </time>
+        <div
+          className={
+            "message-body " + (pending ? "message-pending" : "message-revealed")
+          }
+        >
+          <span
+            className="message-dots"
+            role={pending ? "status" : undefined}
+            aria-label={pending ? messages.chat.revealing : undefined}
+            aria-hidden={!pending}
+          >
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+          </span>
+          <div className="message-reveal" aria-hidden={pending || undefined}>
+            <div>
+              <p className="message-text">{note.text}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
 export function TodoDetail({
   todo,
   now,
-  users,
-  meId,
-  activities,
   onUpdate,
-  onMemo,
   onEdit,
   onDelete,
   onDirty,
 }: {
   todo: Todo;
   now: Date;
-  users: CloudUser[];
-  meId: string | null;
-  activities: Activity[];
-  onUpdate: (patch: TodoPatch, message: string) => Promise<boolean>;
-  onMemo: (body: string) => Promise<boolean>;
+  onUpdate: (todo: Todo, message: string) => boolean;
   onEdit: (setDeadline?: boolean) => void;
   onDelete: () => void;
   onDirty: (dirty: boolean) => void;
 }) {
   const [text, setText] = useState("");
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
-  const [pendingReveals, setPendingReveals] = useState(0);
+  const thread = useRef<HTMLOListElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
-  const previousNotes = useRef(todo.notes.length);
-  const timelineCount = useMemo(
-    () => computeEntries(activities, todo.notes, users).length,
-    [activities, todo.notes, users],
-  );
-  const assignee = todo.assigneeId
-    ? users.find((user) => user.id === todo.assigneeId)
-    : undefined;
-  const assigneeName = todo.assigneeId
-    ? (assignee?.name ?? messages.todo.assigneeUnknown)
-    : null;
+  const scrollAfterSend = useRef(true);
   useEffect(() => {
     onDirty(!!text.trim());
   }, [text, onDirty]);
   useEffect(() => {
-    const added = todo.notes.length - previousNotes.current;
-    if (added > 0 && pendingReveals > 0) {
-      const newIds = todo.notes.slice(-added).map((note) => note.id);
-      const revealed = newIds.slice(0, pendingReveals);
-      setSentIds((ids) => {
-        const next = new Set(ids);
-        for (const id of revealed) next.add(id);
-        return next;
+    if (scrollAfterSend.current && thread.current) {
+      thread.current.scrollTo({
+        top: thread.current.scrollHeight,
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
+          .matches
+          ? "auto"
+          : "smooth",
       });
-      setPendingReveals((count) => Math.max(0, count - added));
+      scrollAfterSend.current = false;
     }
-    previousNotes.current = todo.notes.length;
-  }, [todo.notes, pendingReveals]);
+  }, [todo.notes]);
   const url = calendarUrl(todo);
-  async function post(e?: FormEvent) {
+  function post(e?: FormEvent) {
     e?.preventDefault();
-    const body = text.trim();
-    if (!body) return;
-    // 応答の再取得でメモが届く前に印を付けておき、失敗時は取り消す。
-    setPendingReveals((count) => count + 1);
-    if (!(await onMemo(body))) {
-      setPendingReveals((count) => Math.max(0, count - 1));
-      return;
+    if (!text.trim()) return;
+    const note: Note = {
+      id: crypto.randomUUID(),
+      text: text.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    if (
+      onUpdate(
+        { ...todo, notes: [...todo.notes, note], updatedAt: note.createdAt },
+        messages.chat.sent,
+      )
+    ) {
+      scrollAfterSend.current = true;
+      setSentIds((ids) => new Set(ids).add(note.id));
+      setText("");
     }
-    setText("");
   }
   return (
     <div className="detail-content">
@@ -559,12 +580,6 @@ export function TodoDetail({
             <Flag size={15} />
             {messages.todo.priorityLabel(PRIORITY[todo.priority])}
           </span>
-          {assigneeName && (
-            <span className="assignee">
-              <UserRound size={15} />
-              {assigneeName}
-            </span>
-          )}
           <span
             className={"detail-due " + (isOverdue(todo, now) ? "overdue" : "")}
           >
@@ -590,8 +605,12 @@ export function TodoDetail({
               className="field status-select"
               value={todo.status}
               onChange={(e) =>
-                void onUpdate(
-                  { status: e.target.value as Status },
+                onUpdate(
+                  {
+                    ...todo,
+                    status: e.target.value as Status,
+                    updatedAt: new Date().toISOString(),
+                  },
                   messages.todo.stateUpdated,
                 )
               }
@@ -611,17 +630,24 @@ export function TodoDetail({
       </section>
       <section className="chat" aria-labelledby="notes-heading">
         <div className="chat-heading">
-          <h3 id="notes-heading">{messages.activity.heading}</h3>
-          <span>{timelineCount}</span>
+          <h3 id="notes-heading">{messages.chat.title}</h3>
+          <span>{todo.notes.length}</span>
         </div>
         <div className="chat-well">
-          <Timeline
-            activities={activities}
-            memos={todo.notes}
-            users={users}
-            meId={meId}
-            revealingIds={sentIds}
-          />
+          <ol
+            ref={thread}
+            className="chat-thread"
+            aria-label={messages.chat.history}
+            tabIndex={todo.notes.length ? 0 : undefined}
+          >
+            {todo.notes.map((note) => (
+              <ChatMessage
+                key={note.id}
+                note={note}
+                enter={sentIds.has(note.id)}
+              />
+            ))}
+          </ol>
           <form className="chat-composer" onSubmit={post}>
             <label htmlFor="new-note" className="sr-only">
               {messages.chat.input}
@@ -641,7 +667,7 @@ export function TodoDetail({
                   !e.nativeEvent.isComposing
                 ) {
                   e.preventDefault();
-                  void post();
+                  post();
                 }
               }}
             />
