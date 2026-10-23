@@ -2,20 +2,18 @@ import type { Ref } from "react";
 import {
   CalendarClock,
   CalendarDays,
-  SquareDashed,
+  Circle,
   CircleCheck,
+  LayoutGrid,
   LoaderCircle,
 } from "lucide-react";
 import type { Filter } from "../model";
 import { messages } from "../messages";
-import { CompletionSplash } from "../completion/CompletionSplash";
-import { TodoLayoutIcon } from "./TodoLayoutIcon";
-import type { TodoLayout } from "../storage";
 
 const filters = [
-  { key: "all", icon: null },
-  { key: "active", icon: SquareDashed },
+  { key: "all", icon: LayoutGrid },
   { key: "overdue", icon: CalendarClock },
+  { key: "active", icon: Circle },
   { key: "today", icon: CalendarDays },
   { key: "doing", icon: LoaderCircle },
   { key: "done", icon: CircleCheck },
@@ -23,7 +21,6 @@ const filters = [
 
 interface Props {
   filter: Filter;
-  layout: TodoLayout;
   counts: Record<Filter, number>;
   onSelect: (filter: Filter) => void;
   doneTarget: Ref<HTMLButtonElement>;
@@ -32,7 +29,6 @@ interface Props {
 }
 export function TodoNavigation({
   filter,
-  layout,
   counts,
   onSelect,
   doneTarget,
@@ -50,26 +46,17 @@ export function TodoNavigation({
             aria-current={filter === key ? "page" : undefined}
             onClick={() => onSelect(key)}
           >
-            {Icon ? (
-              <Icon size={19} aria-hidden="true" />
-            ) : (
-              <TodoLayoutIcon layout={layout} size={19} />
-            )}
+            <Icon size={19} />
             <span>{messages.filters.navigation[key]}</span>
-            <span className="nav-counter-anchor">
-              <span
-                key={key === "done" ? `count-${arrival}` : key}
-                ref={key === "done" ? doneCounter : undefined}
-                className={
-                  "nav-count " +
-                  (key === "done" && arrival ? "nav-count-arrived" : "")
-                }
-              >
-                {counts[key]}
-              </span>
-              {key === "done" && arrival > 0 && (
-                <CompletionSplash key={`splash-${arrival}`} />
-              )}
+            <span
+              key={key === "done" ? arrival : key}
+              ref={key === "done" ? doneCounter : undefined}
+              className={
+                "nav-count " +
+                (key === "done" && arrival ? "nav-count-arrived" : "")
+              }
+            >
+              {counts[key]}
             </span>
           </button>
         ))}

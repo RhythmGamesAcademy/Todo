@@ -23,5 +23,14 @@ export default defineConfig({
       },
     },
   ],
+  // ローカルでAPIを別プロセスとして動かす場合の転送先。通常は `vercel dev` を使う。
+  server: {
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_URL ?? "http://127.0.0.1:3000",
+        changeOrigin: true,
+      },
+    },
+  },
   base: "./",
 });
