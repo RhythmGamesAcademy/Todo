@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { configDefaults } from "vitest/config";
 import { messages } from "./src/messages";
 const escapeHtml = (value: string) =>
   value
@@ -23,6 +24,10 @@ export default defineConfig({
       },
     },
   ],
+  // Playwright によるE2Eテストは Vitest の対象から外す。
+  test: {
+    exclude: [...configDefaults.exclude, "e2e/**"],
+  },
   // ローカルでAPIを別プロセスとして動かす場合の転送先。通常は `vercel dev` を使う。
   server: {
     proxy: {
