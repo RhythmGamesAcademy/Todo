@@ -8,5 +8,8 @@ AGENTS.md
 .env
 .vscode
 .superpowers
+.playwright-cli/
+test-results/
+playwright-report/
 .vercel
 .env*
