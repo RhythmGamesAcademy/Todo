@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseCloudState } from "../../src/cloud/parse";
 import { createApp } from "./app";
@@ -173,6 +174,46 @@ describeDb("共有リストAPI", () => {
       after: "牛乳を買う",
       userId: creatorId,
     });
+  });
+
+  it("親TODOの削除でサブタスクとサブタスクメモがカスケード削除される", async () => {
+    const todoRes = await postTodo({
+      title: "サブタスクの親",
+      status: "todo",
+      priority: "low",
+      userId: creatorId,
+    });
+    expect(todoRes.status).toBe(201);
+    const parentTodoId = ((await todoRes.json()) as { id: string }).id;
+    const subtaskId = randomUUID();
+    const memoId = randomUUID();
+
+    await db.sql`
+      INSERT INTO public.subtasks (id, todo_id, title, status, priority, due)
+      VALUES (
+        ${subtaskId},
+        ${parentTodoId},
+        'サブタスク',
+        'todo',
+        'medium',
+        NULL
+      )
+    `;
+    await db.sql`
+      INSERT INTO public.subtask_memos (id, subtask_id, body)
+      VALUES (${memoId}, ${subtaskId}, 'サブタスクのメモ')
+    `;
+
+    await db.sql`DELETE FROM public.todos WHERE id = ${parentTodoId}`;
+
+    const subtaskRows = await db.sql`
+      SELECT id FROM public.subtasks WHERE id = ${subtaskId}
+    `;
+    const memoRows = await db.sql`
+      SELECT id FROM public.subtask_memos WHERE id = ${memoId}
+    `;
+    expect(subtaskRows.rows).toHaveLength(0);
+    expect(memoRows.rows).toHaveLength(0);
   });
 
   it("PATCH は変更フィールドだけ履歴に残し、revision を進める", async () => {
