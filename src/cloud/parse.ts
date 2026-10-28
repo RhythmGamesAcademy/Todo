@@ -1,9 +1,10 @@
 import { messages } from "../messages";
 import { record, validDate } from "../model";
-import type { Priority, Status } from "../model";
+import type { Priority, Status, SubtaskStatus } from "../model";
 import type { ActivityKind, CloudState } from "./types";
 
 const STATUSES: readonly Status[] = ["todo", "doing", "done"];
+const SUBTASK_STATUSES: readonly SubtaskStatus[] = ["todo", "done"];
 const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
 const ACTIVITY_KINDS: readonly ActivityKind[] = [
   "todo.created",
@@ -97,6 +98,37 @@ function validateNote(value: unknown, ids: Set<string>): void {
   ids.add(value.id);
 }
 
+function validateSubtaskMemo(value: unknown, ids: Set<string>): void {
+  if (
+    !record(value) ||
+    !validId(value.id) ||
+    ids.has(value.id) ||
+    !validText(value.text, 2000) ||
+    !isIsoTimestamp(value.createdAt)
+  )
+    return fail();
+  ids.add(value.id);
+}
+
+function validateSubtask(value: unknown, ids: Set<string>): void {
+  if (
+    !record(value) ||
+    !validId(value.id) ||
+    ids.has(value.id) ||
+    !validText(value.title, 120) ||
+    !oneOf(SUBTASK_STATUSES, value.status) ||
+    !oneOf(PRIORITIES, value.priority) ||
+    !(value.deadline === null || isIsoTimestamp(value.deadline)) ||
+    !isIsoTimestamp(value.createdAt) ||
+    !isIsoTimestamp(value.updatedAt) ||
+    !Array.isArray(value.memos)
+  )
+    return fail();
+  ids.add(value.id);
+  const memoIds = new Set<string>();
+  for (const memo of value.memos) validateSubtaskMemo(memo, memoIds);
+}
+
 function validateTodo(value: unknown, ids: Set<string>): void {
   if (
     !record(value) ||
@@ -111,12 +143,16 @@ function validateTodo(value: unknown, ids: Set<string>): void {
     !(value.assigneeId === null || validId(value.assigneeId)) ||
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt) ||
-    !Array.isArray(value.notes)
+    !Array.isArray(value.notes) ||
+    !(value.subtasks === undefined || Array.isArray(value.subtasks))
   )
     return fail();
   ids.add(value.id);
   const noteIds = new Set<string>();
   for (const note of value.notes) validateNote(note, noteIds);
+  const subtaskIds = new Set<string>();
+  for (const subtask of value.subtasks ?? [])
+    validateSubtask(subtask, subtaskIds);
 }
 
 function validateActivity(value: unknown, ids: Set<string>): void {
@@ -153,5 +189,11 @@ export function parseCloudState(input: unknown): CloudState {
   const activityIds = new Set<string>();
   for (const activity of input.activities)
     validateActivity(activity, activityIds);
-  return input as unknown as CloudState;
+  return {
+    ...input,
+    todos: input.todos.map((todo) => ({
+      ...todo,
+      subtasks: todo.subtasks ?? [],
+    })),
+  } as unknown as CloudState;
 }

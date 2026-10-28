@@ -30,6 +30,41 @@ describeDb("共有リストAPI", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
+  const postSubtask = (todoId: string, body: Record<string, unknown>) =>
+    app.request(`/api/lists/${token}/todos/${todoId}/subtasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const patchSubtask = (
+    todoId: string,
+    subtaskId: string,
+    body: Record<string, unknown>,
+  ) =>
+    app.request(`/api/lists/${token}/todos/${todoId}/subtasks/${subtaskId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const postSubtaskMemo = (
+    todoId: string,
+    subtaskId: string,
+    body: Record<string, unknown>,
+  ) =>
+    app.request(
+      `/api/lists/${token}/todos/${todoId}/subtasks/${subtaskId}/memos`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  const deleteSubtask = (todoId: string, subtaskId: string) =>
+    app.request(`/api/lists/${token}/todos/${todoId}/subtasks/${subtaskId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: creatorId }),
+    });
 
   beforeAll(async () => {
     await db.sql`DELETE FROM lists`;
@@ -164,6 +199,7 @@ describeDb("共有リストAPI", () => {
       priority: "medium",
       status: "todo",
       assigneeId: null,
+      subtasks: [],
       notes: [],
     });
     const activity = state.activities.find(
@@ -174,6 +210,62 @@ describeDb("共有リストAPI", () => {
       after: "牛乳を買う",
       userId: creatorId,
     });
+  });
+
+  it("サブタスクの作成・完了切替・メモ・削除を親TODO単位で取得できる", async () => {
+    const created = await postSubtask(todoId, {
+      title: "資料を確認する",
+      deadline: "2026-10-20T12:00:00.000Z",
+      priority: "high",
+      status: "todo",
+      userId: creatorId,
+    });
+    expect(created.status).toBe(201);
+    const subtaskId = ((await created.json()) as { id: string }).id;
+
+    let state = await getState();
+    let parent = state.todos.find((item: { id: string }) => item.id === todoId);
+    expect(parent.subtasks).toMatchObject([
+      {
+        id: subtaskId,
+        title: "資料を確認する",
+        deadline: "2026-10-20T12:00:00.000Z",
+        priority: "high",
+        status: "todo",
+        memos: [],
+      },
+    ]);
+
+    const patched = await patchSubtask(todoId, subtaskId, {
+      status: "done",
+      userId: creatorId,
+    });
+    expect(patched.status).toBe(200);
+    expect(
+      ((await patched.json()) as { revision: number }).revision,
+    ).toBeGreaterThan(state.list.revision);
+
+    const memo = await postSubtaskMemo(todoId, subtaskId, {
+      body: "確認済み",
+      userId: creatorId,
+    });
+    expect(memo.status).toBe(201);
+
+    state = await getState();
+    parent = state.todos.find((item: { id: string }) => item.id === todoId);
+    expect(parent.subtasks).toMatchObject([
+      {
+        id: subtaskId,
+        status: "done",
+        memos: [{ text: "確認済み" }],
+      },
+    ]);
+
+    const deleted = await deleteSubtask(todoId, subtaskId);
+    expect(deleted.status).toBe(200);
+    state = await getState();
+    parent = state.todos.find((item: { id: string }) => item.id === todoId);
+    expect(parent.subtasks).toEqual([]);
   });
 
   it("親TODOの削除でサブタスクとサブタスクメモがカスケード削除される", async () => {

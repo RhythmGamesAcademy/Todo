@@ -113,6 +113,7 @@ const task = (extra: Partial<Todo> = {}): Todo => ({
   updatedAt: "2026-10-18T00:00:00.000Z",
   notes: [],
   ...extra,
+  subtasks: extra.subtasks ?? [],
 });
 
 let board: any;
@@ -155,6 +156,7 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
         {
           ...draft,
           id: "created-" + sequence,
+          subtasks: [],
           notes: [],
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -185,6 +187,7 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
           todo.id === todoId
             ? {
                 ...todo,
+                subtasks: [],
                 notes: [
                   ...todo.notes,
                   {
@@ -249,6 +252,7 @@ describe("一覧の表示形式", () => {
   it("簡潔表示は必要な項目だけを表示し、検索・並び順を維持して詳細を開く。表示形式を再読み込み後も保つ", async () => {
     ready([
       task({
+        subtasks: [],
         notes: [
           {
             id: "memo",
@@ -618,6 +622,7 @@ describe("利用者の操作", () => {
   it("削除の確認後に削除し、取り消すと復元を呼ぶ", async () => {
     ready([
       task({
+        subtasks: [],
         notes: [
           {
             id: "note",

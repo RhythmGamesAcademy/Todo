@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { messages } from "../messages";
-import type { TodoDraft } from "../model";
+import type { SubtaskDraft, SubtaskPatch, TodoDraft } from "../model";
 import {
   ApiError,
+  createSubtask,
   createTodo,
+  deleteSubtask,
   deleteList,
   deleteTodo,
   fetchRevision,
   fetchState,
   patchTodo,
+  patchSubtask,
   removeUser,
   renameList,
   renameUser,
   restoreTodo,
   sendMemo,
+  sendSubtaskMemo,
 } from "./client";
 import type { Session } from "./session";
 import type { CloudState, TodoPatch } from "./types";
@@ -32,6 +36,18 @@ export type BoardActions = {
   removeTodo: (id: string) => Promise<void>;
   undoRemove: (id: string) => Promise<void>;
   addMemo: (todoId: string, body: string) => Promise<void>;
+  addSubtask: (todoId: string, draft: SubtaskDraft) => Promise<void>;
+  updateSubtask: (
+    todoId: string,
+    subtaskId: string,
+    patch: SubtaskPatch,
+  ) => Promise<void>;
+  removeSubtask: (todoId: string, subtaskId: string) => Promise<void>;
+  addSubtaskMemo: (
+    todoId: string,
+    subtaskId: string,
+    body: string,
+  ) => Promise<void>;
   renameBoard: (title: string) => Promise<void>;
   removeBoard: () => Promise<void>;
   renameMember: (id: string, name: string) => Promise<void>;
@@ -163,6 +179,26 @@ export function useBoard(
       run((current) => sendMemo(current, todoId, body)),
     [run],
   );
+  const addSubtask = useCallback(
+    (todoId: string, draft: SubtaskDraft) =>
+      run((current) => createSubtask(current, todoId, draft)),
+    [run],
+  );
+  const updateSubtask = useCallback(
+    (todoId: string, subtaskId: string, patch: SubtaskPatch) =>
+      run((current) => patchSubtask(current, todoId, subtaskId, patch)),
+    [run],
+  );
+  const removeSubtask = useCallback(
+    (todoId: string, subtaskId: string) =>
+      run((current) => deleteSubtask(current, todoId, subtaskId)),
+    [run],
+  );
+  const addSubtaskMemo = useCallback(
+    (todoId: string, subtaskId: string, body: string) =>
+      run((current) => sendSubtaskMemo(current, todoId, subtaskId, body)),
+    [run],
+  );
   const renameBoard = useCallback(
     (title: string) => run((current) => renameList(current, title)),
     [run],
@@ -193,6 +229,10 @@ export function useBoard(
     removeTodo,
     undoRemove,
     addMemo,
+    addSubtask,
+    updateSubtask,
+    removeSubtask,
+    addSubtaskMemo,
     renameBoard,
     removeBoard,
     renameMember,

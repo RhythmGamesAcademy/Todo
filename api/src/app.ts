@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Note, Priority, Status } from "../../src/model";
+import type {
+  Note,
+  Priority,
+  Status,
+  Subtask,
+  SubtaskMemo,
+  SubtaskStatus,
+} from "../../src/model";
 import type {
   Activity,
   ActivityKind,
@@ -65,6 +72,24 @@ interface MemoRow {
   created_at: unknown;
 }
 
+interface SubtaskRow {
+  id: string;
+  todo_id: string;
+  title: string;
+  status: string;
+  priority: string;
+  due: unknown;
+  created_at: unknown;
+  updated_at: unknown;
+}
+
+interface SubtaskMemoRow {
+  id: string;
+  subtask_id: string;
+  body: string;
+  created_at: unknown;
+}
+
 interface ActivityRow {
   id: string;
   todo_id: string | null;
@@ -80,6 +105,8 @@ const rowsOf = <T>(result: { rows: unknown[] }): T[] => result.rows as T[];
 
 const toIso = (value: unknown): string =>
   (value instanceof Date ? value : new Date(String(value))).toISOString();
+const toIsoOrNull = (value: unknown): string | null =>
+  value === null ? null : toIso(value);
 
 const toCloudTodo = (row: TodoRow): CloudTodo => ({
   id: row.id,
@@ -92,9 +119,25 @@ const toCloudTodo = (row: TodoRow): CloudTodo => ({
   createdAt: toIso(row.created_at),
   updatedAt: toIso(row.updated_at),
   notes: [],
+  subtasks: [],
+});
+
+const toCloudSubtask = (
+  row: SubtaskRow,
+  memos: SubtaskMemo[] = [],
+): Subtask => ({
+  id: row.id,
+  title: row.title,
+  status: row.status as SubtaskStatus,
+  priority: row.priority as Priority,
+  deadline: row.due === null ? null : toIso(row.due),
+  createdAt: toIso(row.created_at),
+  updatedAt: toIso(row.updated_at),
+  memos,
 });
 
 const STATUSES: readonly Status[] = ["todo", "doing", "done"];
+const SUBTASK_STATUSES: readonly SubtaskStatus[] = ["todo", "done"];
 const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
 // 履歴は編集のたびに条数が増え続けるため、GET の応答は最新 N 件に絞る。
 // 無制限に返すと履歴が溜まったリストで応答サイズが伸び続け、
@@ -237,6 +280,21 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       `,
     );
     return todo ?? null;
+  };
+
+  const findSubtask = async (
+    todoId: string,
+    id: string,
+  ): Promise<SubtaskRow | null> => {
+    if (!UUID.test(id)) return null;
+    const [subtask] = rowsOf<SubtaskRow>(
+      await sql`
+        SELECT id, todo_id, title, status, priority, due, created_at, updated_at
+        FROM public.subtasks
+        WHERE id = ${id} AND todo_id = ${todoId}
+      `,
+    );
+    return subtask ?? null;
   };
 
   const addActivity = (
@@ -589,18 +647,141 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     return c.json({ id }, 201);
   });
 
+  app.post("/api/lists/:token/todos/:todoId/subtasks", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const todo = await findTodo(list.id, c.req.param("todoId"));
+    if (!todo || todo.deleted_at !== null) return notFound(c);
+    const body = await readJson(c);
+
+    const title = assertText(body.title, 120, "title");
+    const deadline =
+      body.deadline === undefined ? null : parseDeadline(body.deadline);
+    const status = parseEnum(body.status, SUBTASK_STATUSES, "status");
+    const priority = parseEnum(body.priority, PRIORITIES, "priority");
+    await readOptionalUserId(body, list.id);
+
+    const id = randomUUID();
+    await transact([
+      sql`
+        INSERT INTO public.subtasks (id, todo_id, title, status, priority, due)
+        VALUES (${id}, ${todo.id}, ${title}, ${status}, ${priority}, ${deadline})
+      `,
+    ]);
+    return c.json({ id }, 201);
+  });
+
+  app.patch(
+    "/api/lists/:token/todos/:todoId/subtasks/:subtaskId",
+    async (c) => {
+      const list = await findList(c.req.param("token"));
+      if (!list) return notFound(c);
+      const todo = await findTodo(list.id, c.req.param("todoId"));
+      if (!todo || todo.deleted_at !== null) return notFound(c);
+      const row = await findSubtask(todo.id, c.req.param("subtaskId"));
+      if (!row) return notFound(c);
+      const body = await readJson(c);
+
+      const title =
+        body.title === undefined
+          ? row.title
+          : assertText(body.title, 120, "title");
+      const deadline =
+        body.deadline === undefined
+          ? toIsoOrNull(row.due)
+          : parseDeadline(body.deadline);
+      const status =
+        body.status === undefined
+          ? (row.status as SubtaskStatus)
+          : parseEnum(body.status, SUBTASK_STATUSES, "status");
+      const priority =
+        body.priority === undefined
+          ? (row.priority as Priority)
+          : parseEnum(body.priority, PRIORITIES, "priority");
+      await readOptionalUserId(body, list.id);
+
+      if (
+        title === row.title &&
+        deadline === toIsoOrNull(row.due) &&
+        status === row.status &&
+        priority === row.priority
+      )
+        return c.json({ revision: await readRevision(list.id) });
+
+      await transact([
+        sql`
+          UPDATE public.subtasks SET
+            title = ${title},
+            due = ${deadline}::timestamptz,
+            status = ${status},
+            priority = ${priority},
+            updated_at = now()
+          WHERE id = ${row.id} AND todo_id = ${todo.id}
+        `,
+      ]);
+      return c.json({ revision: await readRevision(list.id) });
+    },
+  );
+
+  app.delete(
+    "/api/lists/:token/todos/:todoId/subtasks/:subtaskId",
+    async (c) => {
+      const list = await findList(c.req.param("token"));
+      if (!list) return notFound(c);
+      const todo = await findTodo(list.id, c.req.param("todoId"));
+      if (!todo || todo.deleted_at !== null) return notFound(c);
+      const row = await findSubtask(todo.id, c.req.param("subtaskId"));
+      if (!row) return notFound(c);
+      const body = await readOptionalJson(c);
+      await readOptionalUserId(body, list.id);
+
+      await sql`DELETE FROM public.subtasks WHERE id = ${row.id} AND todo_id = ${todo.id}`;
+      return c.json({ revision: await readRevision(list.id) });
+    },
+  );
+
+  app.post(
+    "/api/lists/:token/todos/:todoId/subtasks/:subtaskId/memos",
+    async (c) => {
+      const list = await findList(c.req.param("token"));
+      if (!list) return notFound(c);
+      const todo = await findTodo(list.id, c.req.param("todoId"));
+      if (!todo || todo.deleted_at !== null) return notFound(c);
+      const subtask = await findSubtask(todo.id, c.req.param("subtaskId"));
+      if (!subtask) return notFound(c);
+      const body = await readJson(c);
+
+      const text = assertText(body.body, 2000, "body");
+      await readOptionalUserId(body, list.id);
+      const id = randomUUID();
+      await sql`
+        INSERT INTO public.subtask_memos (id, subtask_id, body)
+        VALUES (${id}, ${subtask.id}, ${text})
+      `;
+      return c.json({ id }, 201);
+    },
+  );
+
   app.get("/api/lists/:token", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
 
-    const [usersResult, todosResult, memosResult, activitiesResult] =
-      await Promise.all([
-        sql`SELECT id, name, created_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
-        sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
-        sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
-        // 最新順に取得して上位 ACTIVITY_LIMIT 件に絞り、応答では時系列(昇順)に戻す。
-        sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at DESC, id DESC LIMIT ${ACTIVITY_LIMIT}`,
-      ]);
+    const [
+      usersResult,
+      todosResult,
+      memosResult,
+      subtasksResult,
+      subtaskMemosResult,
+      activitiesResult,
+    ] = await Promise.all([
+      sql`SELECT id, name, created_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
+      sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
+      sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
+      sql`SELECT s.id, s.todo_id, s.title, s.status, s.priority, s.due, s.created_at, s.updated_at FROM public.subtasks s JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY s.created_at, s.id`,
+      sql`SELECT m.id, m.subtask_id, m.body, m.created_at FROM public.subtask_memos m JOIN public.subtasks s ON s.id = m.subtask_id JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
+      // 最新順に取得して上位 ACTIVITY_LIMIT 件に絞り、応答では時系列(昇順)に戻す。
+      sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at DESC, id DESC LIMIT ${ACTIVITY_LIMIT}`,
+    ]);
 
     const notesByTodo = new Map<string, Note[]>();
     for (const memo of rowsOf<MemoRow>(memosResult)) {
@@ -613,6 +794,29 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       const notes = notesByTodo.get(memo.todo_id);
       if (notes) notes.push(note);
       else notesByTodo.set(memo.todo_id, [note]);
+    }
+
+    const subtaskMemosBySubtask = new Map<string, SubtaskMemo[]>();
+    for (const memo of rowsOf<SubtaskMemoRow>(subtaskMemosResult)) {
+      const subtaskMemo: SubtaskMemo = {
+        id: memo.id,
+        text: memo.body,
+        createdAt: toIso(memo.created_at),
+      };
+      const memos = subtaskMemosBySubtask.get(memo.subtask_id);
+      if (memos) memos.push(subtaskMemo);
+      else subtaskMemosBySubtask.set(memo.subtask_id, [subtaskMemo]);
+    }
+
+    const subtasksByTodo = new Map<string, Subtask[]>();
+    for (const subtask of rowsOf<SubtaskRow>(subtasksResult)) {
+      const item = toCloudSubtask(
+        subtask,
+        subtaskMemosBySubtask.get(subtask.id) ?? [],
+      );
+      const subtasks = subtasksByTodo.get(subtask.todo_id);
+      if (subtasks) subtasks.push(item);
+      else subtasksByTodo.set(subtask.todo_id, [item]);
     }
 
     const state: CloudState = {
@@ -629,6 +833,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       todos: rowsOf<TodoRow>(todosResult).map((todo): CloudTodo => ({
         ...toCloudTodo(todo),
         notes: notesByTodo.get(todo.id) ?? [],
+        subtasks: subtasksByTodo.get(todo.id) ?? [],
       })),
       activities: rowsOf<ActivityRow>(activitiesResult)
         .reverse()

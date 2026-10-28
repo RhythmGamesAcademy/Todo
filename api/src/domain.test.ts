@@ -65,6 +65,7 @@ describe("computeActivities", () => {
     assigneeId: "user-1",
     createdAt: "2026-10-18T00:00:00.000Z",
     updatedAt: "2026-10-18T00:00:00.000Z",
+    subtasks: [],
     notes: [],
   };
 
