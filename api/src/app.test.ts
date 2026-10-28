@@ -268,6 +268,59 @@ describeDb("共有リストAPI", () => {
     expect(parent.subtasks).toEqual([]);
   });
 
+  it("サブタスクの入力検証は不正なタイトル・メモ・期限・状態・優先度を拒否する", async () => {
+    const valid = {
+      title: "検証対象",
+      deadline: "2026-10-20T12:00:00.000Z",
+      priority: "medium",
+      status: "todo",
+    };
+    const invalidSubtasks = [
+      { title: "  " },
+      { title: "あ".repeat(121) },
+      { deadline: "2026-10-20" },
+      { status: "doing" },
+      { priority: "urgent" },
+    ];
+
+    for (const patch of invalidSubtasks) {
+      const response = await postSubtask(todoId, { ...valid, ...patch });
+      expect(response.status).toBe(400);
+    }
+
+    const subtask = await postSubtask(todoId, valid);
+    expect(subtask.status).toBe(201);
+    const subtaskId = ((await subtask.json()) as { id: string }).id;
+    for (const patch of invalidSubtasks) {
+      const response = await patchSubtask(todoId, subtaskId, patch);
+      expect(response.status).toBe(400);
+    }
+
+    for (const body of [{ body: "  " }, { body: "あ".repeat(2001) }]) {
+      const response = await postSubtaskMemo(todoId, subtaskId, body);
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it("存在しない親TODO・サブタスクへの操作は404", async () => {
+    const missingTodo = "00000000-0000-4000-8000-000000000000";
+    const missingSubtask = "00000000-0000-4000-8000-000000000001";
+    const valid = {
+      title: "存在しない対象",
+      priority: "low",
+      status: "todo",
+    };
+
+    expect((await postSubtask(missingTodo, valid)).status).toBe(404);
+    expect(
+      (await patchSubtask(todoId, missingSubtask, { status: "done" })).status,
+    ).toBe(404);
+    expect((await deleteSubtask(todoId, missingSubtask)).status).toBe(404);
+    expect(
+      (await postSubtaskMemo(todoId, missingSubtask, { body: "メモ" })).status,
+    ).toBe(404);
+  });
+
   it("親TODOの削除でサブタスクとサブタスクメモがカスケード削除される", async () => {
     const todoRes = await postTodo({
       title: "サブタスクの親",
@@ -357,6 +410,20 @@ describeDb("共有リストAPI", () => {
   });
 
   it("DELETEで非表示・restoreで再表示され、メモと履歴は維持される", async () => {
+    const subtaskRes = await postSubtask(todoId, {
+      title: "削除後に戻るサブタスク",
+      priority: "medium",
+      status: "todo",
+      userId: creatorId,
+    });
+    expect(subtaskRes.status).toBe(201);
+    const restoredSubtaskId = ((await subtaskRes.json()) as { id: string }).id;
+    const subtaskMemoRes = await postSubtaskMemo(todoId, restoredSubtaskId, {
+      body: "削除後も戻るメモ",
+      userId: creatorId,
+    });
+    expect(subtaskMemoRes.status).toBe(201);
+
     const memoRes = await app.request(
       `/api/lists/${token}/todos/${todoId}/memos`,
       {
@@ -391,6 +458,9 @@ describeDb("共有リストAPI", () => {
     expect(
       state.todos.find((item: { id: string }) => item.id === todoId),
     ).toBeUndefined();
+    expect(
+      state.todos.flatMap((item: { subtasks: unknown[] }) => item.subtasks),
+    ).not.toContainEqual(expect.objectContaining({ id: restoredSubtaskId }));
     const deleteActivity = state.activities.find(
       (item: { kind: string; todoId: string | null }) =>
         item.kind === "todo.deleted" && item.todoId === todoId,
@@ -433,6 +503,12 @@ describeDb("共有リストAPI", () => {
     expect(todo).toBeDefined();
     expect(todo.notes).toHaveLength(1);
     expect(todo.notes[0]).toMatchObject({ id: memo.id, text: "牛乳は低脂肪" });
+    expect(todo.subtasks).toContainEqual(
+      expect.objectContaining({
+        id: restoredSubtaskId,
+        memos: [expect.objectContaining({ text: "削除後も戻るメモ" })],
+      }),
+    );
     const restoreActivity = state.activities.find(
       (item: { kind: string; todoId: string | null }) =>
         item.kind === "todo.restored" && item.todoId === todoId,

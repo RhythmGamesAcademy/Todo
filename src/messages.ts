@@ -207,6 +207,7 @@ export const messages = {
     memoSend: "メモを追加",
     memoCount: (count: number) => count + "件のメモ",
     count: (done: number, total: number) => "サブタスク " + done + "/" + total,
+    empty: "サブタスクなし",
     toggleLabel: (title: string) => title + "の完了状態を切り替える",
     editLabel: (title: string) => title + "を編集",
     deleteLabel: (title: string) => title + "を削除",

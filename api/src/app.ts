@@ -583,6 +583,9 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     if (row.deleted_at !== null)
       return c.json({ revision: await readRevision(list.id) });
 
+    // TODO削除は取り消し可能なソフト削除。親を非表示にすると取得結果から
+    // サブタスクも隠れるが、行は保持して restore で復元する。
+    // 物理削除はDBのON DELETE CASCADEに任せ、サブタスクとメモも削除する。
     await transact([
       sql`
         UPDATE public.todos SET deleted_at = now()
@@ -777,6 +780,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       sql`SELECT id, name, created_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
       sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
       sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
+      // 親TODOのソフト削除中は、復元までサブタスクも取得結果から隠す。
       sql`SELECT s.id, s.todo_id, s.title, s.status, s.priority, s.due, s.created_at, s.updated_at FROM public.subtasks s JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY s.created_at, s.id`,
       sql`SELECT m.id, m.subtask_id, m.body, m.created_at FROM public.subtask_memos m JOIN public.subtasks s ON s.id = m.subtask_id JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
       // 最新順に取得して上位 ACTIVITY_LIMIT 件に絞り、応答では時系列(昇順)に戻す。

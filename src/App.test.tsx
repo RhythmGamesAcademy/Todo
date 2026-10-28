@@ -575,6 +575,18 @@ describe("利用者の操作", () => {
     ).toBeNull();
   });
 
+  it("サブタスクがない詳細画面では専用の空状態を表示する", async () => {
+    ready([task({ subtasks: [] })]);
+    render(<App />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+
+    expect(screen.getByText(messages.subtask.empty)).toBeTruthy();
+    expect(screen.queryByText(messages.filters.empty)).toBeNull();
+  });
+
   it("優先度は左から低・中・高の順で選べて、選んだ値で保存する", async () => {
     const user = userEvent.setup();
     render(<App />);

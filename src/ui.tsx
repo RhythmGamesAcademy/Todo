@@ -1054,7 +1054,7 @@ export function TodoDetail({
           </ul>
         )}
         {todo.subtasks.length === 0 && editingSubtaskId === "" && (
-          <p className="subtask-empty">{messages.filters.empty}</p>
+          <p className="subtask-empty">{messages.subtask.empty}</p>
         )}
       </section>
       <section className="chat" aria-labelledby="notes-heading">
