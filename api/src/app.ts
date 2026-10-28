@@ -96,6 +96,10 @@ const toCloudTodo = (row: TodoRow): CloudTodo => ({
 
 const STATUSES: readonly Status[] = ["todo", "doing", "done"];
 const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
+// 履歴は編集のたびに条数が増え続けるため、GET の応答は最新 N 件に絞る。
+// 無制限に返すと履歴が溜まったリストで応答サイズが伸び続け、
+// 取得コスト(帯域・ Neon の行スキャン)がリクエストごとに増大する。
+const ACTIVITY_LIMIT = 500;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 // UUID 以外の文字列を uuid 列と比較すると Postgres が 22P02 で落ちるため、
@@ -594,7 +598,8 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
         sql`SELECT id, name, created_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
         sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
         sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
-        sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at, id`,
+        // 最新順に取得して上位 ACTIVITY_LIMIT 件に絞り、応答では時系列(昇順)に戻す。
+        sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at DESC, id DESC LIMIT ${ACTIVITY_LIMIT}`,
       ]);
 
     const notesByTodo = new Map<string, Note[]>();
@@ -625,8 +630,9 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
         ...toCloudTodo(todo),
         notes: notesByTodo.get(todo.id) ?? [],
       })),
-      activities: rowsOf<ActivityRow>(activitiesResult).map(
-        (activity): Activity => ({
+      activities: rowsOf<ActivityRow>(activitiesResult)
+        .reverse()
+        .map((activity): Activity => ({
           id: activity.id,
           todoId: activity.todo_id,
           userId: activity.user_id,
@@ -635,8 +641,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
           before: activity.before,
           after: activity.after,
           createdAt: toIso(activity.created_at),
-        }),
-      ),
+        })),
     };
     return c.json(state);
   });
