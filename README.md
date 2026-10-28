@@ -17,7 +17,7 @@ npm run dev
 
 `npm run dev` はフロントエンド（Vite）だけを起動します。画面と `/api` をまとめてローカルで動かす場合は `vercel dev` を使用してください。APIだけを別プロセスで動かす場合は `npm run dev:api`（`.env.local` の `DATABASE_URL` を読む）を先に起動しておくと、Viteが `/api` を `http://127.0.0.1:3000` へプロキシします（`VITE_API_URL` で転送先を変更できます）。
 
-初回は `.env.local`（Git管理外）に `DATABASE_URL` として Neon devブランチの接続文字列 `postgres://...` を1行で記載し、`psql "$DATABASE_URL" -f db/schema.sql` でスキーマを適用してから起動します。
+初回は `.env.local`（Git管理外）に `DATABASE_URL` として Neon devブランチの接続文字列 `postgres://...` を1行で記載し、`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema.sql` でスキーマを適用してから起動します。このスキーマにはTODOのサブタスクとサブタスクメモ（`subtasks`・`subtask_memos`）も含まれます。既存DBへ適用する場合は、先にバックアップを取得し、検証環境で適用と動作確認を行ってください。
 
 注意: `npm install` や `npm ci` は実行した側のOS向け（WSLならLinux、PowerShellならWindows）のネイティブ依存（rollup・esbuild）だけを node_modules に残すため、WSLとPowerShellを行き来していたずらに実行すると、もう片方でビルドやテストが落ちます。途中で切り替えた場合は切り替えた側で `npm ci` を実行し直してください。
 
@@ -162,11 +162,13 @@ TODO・メモ・メンバー・変更履歴はNeon上のリストに保存され
 
 1. Neonでプロジェクトを作成し、開発用のdevブランチを用意します。
 2. ローカルとCIではdevブランチの接続文字列を `TEST_DATABASE_URL` に、本番では本番ブランチの接続文字列をVercelの環境変数 `DATABASE_URL` に設定します。
-3. それぞれの接続文字列に対してスキーマを適用します。
+3. それぞれの接続文字列に対してスキーマを適用します。既存DBへ適用する場合は、先にバックアップを取得し、検証環境で適用と動作確認を行ってください。
 
 ```sh
-psql "$DATABASE_URL" -f db/schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
 ```
+
+`db/schema.sql` を適用すると、lists・users・todos・subtasks・subtask_memos・memos・activitiesと、revision更新用のトリガーが作成されます。適用後は `subtasks` と `subtask_memos` が存在すること、TODO削除時に関連するサブタスクとサブタスクメモも削除されることを検証してください。
 
 接続文字列はコードやコミットに含めないでください。ローカルでは `.env.local` などGit管理外のファイルに置きます（`.env.example` は項目名だけの雛形です）。
 
@@ -220,7 +222,7 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 - api/src/app.ts / app.test.ts: リスト・メンバー・TODO・メモ・履歴のHTTPルート
 - api/src/domain.ts / domain.test.ts: 入力検証、トークン生成、履歴の差分計算
 - api/src/sql.ts: Neonクライアントとトランザクションのアダプター
-- db/schema.sql: lists・users・todos・memos・activitiesのスキーマとrevision更新トリガー
+- db/schema.sql: lists・users・todos・subtasks・subtask_memos・memos・activitiesのスキーマとrevision更新トリガー
 - vercel.json: `/api` をHonoエントリへ転送するrewrite
 - .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` の項目名だけの雛形
 
