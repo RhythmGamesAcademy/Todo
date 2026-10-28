@@ -1,4 +1,12 @@
-import type { Todo, TodoDraft } from "../model";
+import type {
+  Subtask,
+  SubtaskDraft,
+  SubtaskMemo,
+  SubtaskPatch,
+  Todo,
+  TodoDraft,
+} from "../model";
+export type { Subtask, SubtaskDraft, SubtaskMemo, SubtaskPatch };
 export type ActivityKind =
   | "todo.created"
   | "todo.updated"

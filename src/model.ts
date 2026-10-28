@@ -1,5 +1,6 @@
 import { messages } from "./messages";
 export type Status = "todo" | "doing" | "done";
+export type SubtaskStatus = "todo" | "done";
 export type Priority = "high" | "medium" | "low";
 export type Filter = "all" | "overdue" | "active" | "today" | "doing" | "done";
 export type Sort = "deadline" | "priority";
@@ -10,6 +11,21 @@ export interface Note {
   createdAt: string;
   editedAt?: string;
   userId: string | null;
+}
+export interface SubtaskMemo {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+export interface Subtask {
+  id: string;
+  title: string;
+  status: SubtaskStatus;
+  priority: Priority;
+  deadline: string | null;
+  createdAt: string;
+  updatedAt: string;
+  memos: SubtaskMemo[];
 }
 export interface Todo {
   id: string;
@@ -22,6 +38,7 @@ export interface Todo {
   createdAt: string;
   updatedAt: string;
   notes: Note[];
+  subtasks: Subtask[];
 }
 export interface TodoDraft {
   title: string;
@@ -31,6 +48,13 @@ export interface TodoDraft {
   status: Status;
   assigneeId: string | null;
 }
+export interface SubtaskDraft {
+  title: string;
+  status: SubtaskStatus;
+  priority: Priority;
+  deadline: string | null;
+}
+export type SubtaskPatch = Partial<SubtaskDraft>;
 export const STATUS: Record<Status, string> = messages.status;
 export const PRIORITY: Record<Priority, string> = messages.priority;
 export const FILTER_LABEL: Record<Filter, string> = messages.filters.heading;

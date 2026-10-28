@@ -22,6 +22,7 @@ const validState = (): CloudState => ({
       assigneeId: "user-1",
       createdAt: now,
       updatedAt: now,
+      subtasks: [],
       notes: [
         {
           id: "note-1",
@@ -48,6 +49,7 @@ const validState = (): CloudState => ({
       assigneeId: null,
       createdAt: now,
       updatedAt: now,
+      subtasks: [],
       notes: [],
     },
   ],
@@ -88,6 +90,42 @@ describe("parseCloudState", () => {
   it("正しい共有データをそのまま返す", () => {
     const state = validState();
     expect(parseCloudState(state)).toEqual(state);
+  });
+
+  it("サブタスクとメモの必須項目を検証する", () => {
+    const subtask = validState().todos[0].subtasks[0] ?? {
+      id: "subtask-1",
+      title: "確認する",
+      status: "todo" as const,
+      priority: "medium" as const,
+      deadline: null,
+      createdAt: now,
+      updatedAt: now,
+      memos: [{ id: "subtask-memo-1", text: "補足", createdAt: now }],
+    };
+    const state = validState();
+    state.todos[0].subtasks = [subtask];
+    expect(parseCloudState(state)).toEqual(state);
+    const brokenSubtask = (change: (state: any) => void) => {
+      const next = validState();
+      next.todos[0].subtasks = [structuredClone(subtask)];
+      change(next);
+      return next;
+    };
+    reject(brokenSubtask((s) => (s.todos[0].subtasks[0].title = "")));
+    reject(brokenSubtask((s) => delete s.todos[0].subtasks[0].deadline));
+    reject(brokenSubtask((s) => (s.todos[0].subtasks[0].status = "doing")));
+    reject(brokenSubtask((s) => delete s.todos[0].subtasks[0].memos[0].text));
+    reject(
+      brokenSubtask((s) => delete s.todos[0].subtasks[0].memos[0].createdAt),
+    );
+  });
+
+  it("旧データのサブタスク欠落は空配列に補う", () => {
+    const state = validState();
+    delete (state.todos[0] as unknown as Record<string, unknown>).subtasks;
+    const parsed = parseCloudState(state);
+    expect(parsed.todos[0].subtasks).toEqual([]);
   });
 
   it("空の一覧を受け付ける", () => {

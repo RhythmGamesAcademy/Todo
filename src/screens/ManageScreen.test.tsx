@@ -38,6 +38,7 @@ const todo = (extra: Partial<Todo>): Todo => ({
   updatedAt: "2026-10-03T00:00:00.000Z",
   notes: [],
   ...extra,
+  subtasks: extra.subtasks ?? [],
 });
 
 const state: CloudState = {

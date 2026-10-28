@@ -15,6 +15,7 @@ const make = (
   priority,
   status: "todo",
   assigneeId: null,
+  subtasks: [],
   notes: [],
   createdAt: now.toISOString(),
   updatedAt: now.toISOString(),

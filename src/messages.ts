@@ -191,6 +191,47 @@ export const messages = {
       set: "期限を設定する",
     },
   },
+  subtask: {
+    heading: "サブタスク",
+    add: "サブタスクを追加",
+    edit: "サブタスクを編集",
+    save: "サブタスクを保存",
+    delete: "サブタスクを削除",
+    title: "サブタスクのタイトル",
+    deadline: "期限",
+    noDeadline: "期限を設定しない",
+    priority: "優先度",
+    status: "完了状態",
+    memo: "サブタスクのメモ",
+    memoInput: "サブタスクのメモを入力",
+    memoSend: "メモを追加",
+    memoCount: (count: number) => count + "件のメモ",
+    count: (done: number, total: number) => "サブタスク " + done + "/" + total,
+    empty: "サブタスクなし",
+    toggleLabel: (title: string) => title + "の完了状態を切り替える",
+    editLabel: (title: string) => title + "を編集",
+    deleteLabel: (title: string) => title + "を削除",
+    created: "サブタスクを追加しました",
+    saved: "サブタスクを保存しました",
+    deleted: "サブタスクを削除しました",
+    stateUpdated: "サブタスクの完了状態を更新しました",
+    memoSent: "サブタスクのメモを追加しました",
+    deleteTitle: "このサブタスクを削除しますか？",
+    deleteDescription: (title: string, memos: number) =>
+      "「" +
+      title +
+      "」と、" +
+      memos +
+      "件のメモを削除します。元に戻せません。",
+    titleRequired: "サブタスクのタイトルを入力してください。",
+    invalidDeadline: "有効な期限日時を入力してください。",
+    noDeadlineConfirm: {
+      title: "期限なしで保存しますか？",
+      description: "期限なしのサブタスクは、あとから期限を設定できます。",
+      save: "期限なしで保存",
+      set: "期限を設定する",
+    },
+  },
   discard: {
     title: "入力中の内容を破棄しますか？",
     description: "保存していない入力内容が失われます。",

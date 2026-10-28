@@ -23,6 +23,7 @@ const state: CloudState = {
       assigneeId: "user-1",
       createdAt: "2026-10-19T00:00:00.000Z",
       updatedAt: "2026-10-20T00:00:00.000Z",
+      subtasks: [],
       notes: [
         {
           id: "note-1",

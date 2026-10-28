@@ -17,7 +17,19 @@ npm run dev
 
 `npm run dev` はフロントエンド（Vite）だけを起動します。画面と `/api` をまとめてローカルで動かす場合は `vercel dev` を使用してください。APIだけを別プロセスで動かす場合は `npm run dev:api`（`.env.local` の `DATABASE_URL` を読む）を先に起動しておくと、Viteが `/api` を `http://127.0.0.1:3000` へプロキシします（`VITE_API_URL` で転送先を変更できます）。
 
-初回は `.env.local`（Git管理外）に `DATABASE_URL` として Neon devブランチの接続文字列 `postgres://...` を1行で記載し、`psql "$DATABASE_URL" -f db/schema.sql` でスキーマを適用してから起動します。
+初回は `.env.local`（Git管理外）に `DATABASE_URL` としてNeon devブランチの接続文字列を1行で記載してから起動します。新規DBは次の順で適用してください。
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
+```
+
+`db/schema.sql` は空のDBへの初回適用用です。既存DBにはこのファイルを再適用せず、先にバックアップを取得して検証環境で確認したうえで、次の既存スキーマ向けマイグレーションだけを適用してください。
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_subtasks.sql
+```
+
+このマイグレーションは `db/schema.sql` 適用済みの既存DBを前提とし、サブタスクとサブタスクメモ（`subtasks`・`subtask_memos`）、索引、revision更新用トリガーを再実行可能な形で追加します。接続文字列はコードやコミットに含めないでください。
 
 注意: `npm install` や `npm ci` は実行した側のOS向け（WSLならLinux、PowerShellならWindows）のネイティブ依存（rollup・esbuild）だけを node_modules に残すため、WSLとPowerShellを行き来していたずらに実行すると、もう片方でビルドやテストが落ちます。途中で切り替えた場合は切り替えた側で `npm ci` を実行し直してください。
 
@@ -138,7 +150,7 @@ TODO・メモ・メンバー・変更履歴はNeon上のリストに保存され
 
 ## 書き出し
 
-管理画面の「データの書き出し」から、現在のリストを `todo-cloud-YYYY-MM-DD.json` として保存できます。ファイルはクラウド版のversion 2で、リスト名・メンバー・TODO（メモと担当者を含む）・変更履歴・書き出し日時を含みます。
+管理画面の「データの書き出し」から、現在のリストを `todo-cloud-YYYY-MM-DD.json` として保存できます。ファイルはクラウド版のversion 2で、リスト名・メンバー・TODO（メモと担当者を含む）・ネストしたサブタスク（サブタスクメモを含む）・変更履歴・書き出し日時を含みます。
 
 書き出しは読み取り専用のスナップショットです。JSONの読み込み・復元・一括削除は廃止しており、サーバー上のデータは書き出しでは変更されません。復元が必要な場合は、書き出した内容を確認したうえで手動で再登録してください。
 
@@ -162,11 +174,19 @@ TODO・メモ・メンバー・変更履歴はNeon上のリストに保存され
 
 1. Neonでプロジェクトを作成し、開発用のdevブランチを用意します。
 2. ローカルとCIではdevブランチの接続文字列を `TEST_DATABASE_URL` に、本番では本番ブランチの接続文字列をVercelの環境変数 `DATABASE_URL` に設定します。
-3. それぞれの接続文字列に対してスキーマを適用します。
+3. 新規DBには `db/schema.sql` を、既存DBには `db/migrations/001_subtasks.sql` を適用します。既存DBへ適用する場合は、先にバックアップを取得し、検証環境で適用と動作確認を行ってください。
 
 ```sh
-psql "$DATABASE_URL" -f db/schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
 ```
+
+新規DBで `db/schema.sql` を適用すると、lists・users・todos・subtasks・subtask_memos・memos・activitiesと、revision更新用のトリガーが作成されます。既存DBでは、上記の初回適用コマンドの代わりに次を実行してください。
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_subtasks.sql
+```
+
+適用後は `subtasks` と `subtask_memos` が存在すること、TODO削除時に関連するサブタスクとサブタスクメモも削除されることを検証してください。
 
 接続文字列はコードやコミットに含めないでください。ローカルでは `.env.local` などGit管理外のファイルに置きます（`.env.example` は項目名だけの雛形です）。
 
@@ -220,7 +240,8 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 - api/src/app.ts / app.test.ts: リスト・メンバー・TODO・メモ・履歴のHTTPルート
 - api/src/domain.ts / domain.test.ts: 入力検証、トークン生成、履歴の差分計算
 - api/src/sql.ts: Neonクライアントとトランザクションのアダプター
-- db/schema.sql: lists・users・todos・memos・activitiesのスキーマとrevision更新トリガー
+- db/schema.sql: lists・users・todos・subtasks・subtask_memos・memos・activitiesのスキーマとrevision更新トリガー
+- db/migrations/001_subtasks.sql: 既存DBへサブタスク用テーブル・索引・revision更新トリガーを追加する再実行可能なマイグレーション
 - vercel.json: `/api` をHonoエントリへ転送するrewrite
 - .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` の項目名だけの雛形
 

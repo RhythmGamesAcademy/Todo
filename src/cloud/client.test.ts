@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../messages";
 import {
   ApiError,
+  createSubtask,
   createList,
   createTodo,
+  deleteSubtask,
   deleteTodo,
   fetchRevision,
   fetchState,
   join,
   patchTodo,
+  patchSubtask,
   renameList,
   sendMemo,
+  sendSubtaskMemo,
 } from "./client";
 import { writeSession } from "./session";
 import type { CloudState } from "./types";
@@ -35,6 +39,7 @@ const validState = (): CloudState => ({
       assigneeId: "user-1",
       createdAt: NOW,
       updatedAt: NOW,
+      subtasks: [],
       notes: [
         {
           id: "note-1",
@@ -200,6 +205,57 @@ describe("呼び出し元の userId", () => {
     expect(bodyOf(mock)).toEqual({ status: "done", userId: "user-1" });
     expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1/todos/todo-1");
     expect(mock.mock.calls[0][1]?.method).toBe("PATCH");
+  });
+
+  describe("サブタスクAPI", () => {
+    it("作成・更新・削除・メモのHTTPメソッド、URL、本文を固定する", async () => {
+      writeSession(session);
+      const draft = {
+        title: "資料を確認",
+        status: "todo" as const,
+        priority: "high" as const,
+        deadline: "2026-10-20T12:00:00.000Z",
+      };
+
+      const createMock = stubFetch({ status: 201, body: { id: "subtask-1" } });
+      await expect(createSubtask("tok-1", "todo-1", draft)).resolves.toEqual({
+        id: "subtask-1",
+      });
+      expect(createMock.mock.calls[0][0]).toBe(
+        "/api/lists/tok-1/todos/todo-1/subtasks",
+      );
+      expect(createMock.mock.calls[0][1]?.method).toBe("POST");
+      expect(bodyOf(createMock)).toEqual({ ...draft, userId: "user-1" });
+      vi.unstubAllGlobals();
+
+      const patchMock = stubFetch({ body: { revision: 8 } });
+      await expect(
+        patchSubtask("tok-1", "todo-1", "subtask-1", { status: "done" }),
+      ).resolves.toEqual({ revision: 8 });
+      expect(patchMock.mock.calls[0][0]).toBe(
+        "/api/lists/tok-1/todos/todo-1/subtasks/subtask-1",
+      );
+      expect(patchMock.mock.calls[0][1]?.method).toBe("PATCH");
+      expect(bodyOf(patchMock)).toEqual({ status: "done", userId: "user-1" });
+      vi.unstubAllGlobals();
+
+      const memoMock = stubFetch({ status: 201, body: { id: "memo-1" } });
+      await sendSubtaskMemo("tok-1", "todo-1", "subtask-1", "確認済み");
+      expect(memoMock.mock.calls[0][0]).toBe(
+        "/api/lists/tok-1/todos/todo-1/subtasks/subtask-1/memos",
+      );
+      expect(memoMock.mock.calls[0][1]?.method).toBe("POST");
+      expect(bodyOf(memoMock)).toEqual({ body: "確認済み", userId: "user-1" });
+      vi.unstubAllGlobals();
+
+      const deleteMock = stubFetch({ body: { revision: 9 } });
+      await deleteSubtask("tok-1", "todo-1", "subtask-1");
+      expect(deleteMock.mock.calls[0][0]).toBe(
+        "/api/lists/tok-1/todos/todo-1/subtasks/subtask-1",
+      );
+      expect(deleteMock.mock.calls[0][1]?.method).toBe("DELETE");
+      expect(bodyOf(deleteMock)).toEqual({ userId: "user-1" });
+    });
   });
 
   it("createTodo・sendMemo・deleteTodo・renameList も userId を添える", async () => {
