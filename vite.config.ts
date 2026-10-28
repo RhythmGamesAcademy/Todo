@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { configDefaults } from "vitest/config";
-import { messages } from "./src/messages";
+import { messages } from "./src/messages.ts";
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, "&amp;")
