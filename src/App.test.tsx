@@ -12,7 +12,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { messages } from "./messages";
-import type { Todo, TodoDraft } from "./model";
+import type { Subtask, Todo, TodoDraft } from "./model";
 
 // ヘッダーと空状態の両方が同じ作成操作を提示し得るため、main 内の最初の1つを使う。
 const createButton = () =>
@@ -113,6 +113,18 @@ const task = (extra: Partial<Todo> = {}): Todo => ({
   updatedAt: "2026-10-18T00:00:00.000Z",
   notes: [],
   ...extra,
+  subtasks: extra.subtasks ?? [],
+});
+const subtask = (extra: Partial<Subtask> = {}): Subtask => ({
+  id: "subtask-1",
+  title: "資料を確認する",
+  status: "todo",
+  priority: "medium",
+  deadline: "2026-10-29T10:00:00.000Z",
+  createdAt: "2026-10-18T00:00:00.000Z",
+  updatedAt: "2026-10-18T00:00:00.000Z",
+  memos: [],
+  ...extra,
 });
 
 let board: any;
@@ -155,6 +167,7 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
         {
           ...draft,
           id: "created-" + sequence,
+          subtasks: [],
           notes: [],
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -185,6 +198,7 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
           todo.id === todoId
             ? {
                 ...todo,
+                subtasks: todo.subtasks,
                 notes: [
                   ...todo.notes,
                   {
@@ -200,6 +214,94 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
         ),
       );
     }),
+    addSubtask: vi.fn(
+      async (
+        todoId: string,
+        draft: Omit<Subtask, "id" | "createdAt" | "updatedAt" | "memos">,
+      ) => {
+        sequence += 1;
+        commit(
+          board.state.todos.map((todo: Todo) =>
+            todo.id === todoId
+              ? {
+                  ...todo,
+                  subtasks: [
+                    ...todo.subtasks,
+                    {
+                      ...draft,
+                      id: "subtask-" + sequence,
+                      createdAt: timestamp,
+                      updatedAt: timestamp,
+                      memos: [],
+                    },
+                  ],
+                }
+              : todo,
+          ),
+        );
+      },
+    ),
+    updateSubtask: vi.fn(
+      async (todoId: string, subtaskId: string, patch: Partial<Subtask>) => {
+        commit(
+          board.state.todos.map((todo: Todo) =>
+            todo.id === todoId
+              ? {
+                  ...todo,
+                  subtasks: todo.subtasks.map((subtask) =>
+                    subtask.id === subtaskId
+                      ? { ...subtask, ...patch, updatedAt: timestamp }
+                      : subtask,
+                  ),
+                }
+              : todo,
+          ),
+        );
+      },
+    ),
+    removeSubtask: vi.fn(async (todoId: string, subtaskId: string) => {
+      commit(
+        board.state.todos.map((todo: Todo) =>
+          todo.id === todoId
+            ? {
+                ...todo,
+                subtasks: todo.subtasks.filter(
+                  (subtask) => subtask.id !== subtaskId,
+                ),
+              }
+            : todo,
+        ),
+      );
+    }),
+    addSubtaskMemo: vi.fn(
+      async (todoId: string, subtaskId: string, body: string) => {
+        sequence += 1;
+        commit(
+          board.state.todos.map((todo: Todo) =>
+            todo.id === todoId
+              ? {
+                  ...todo,
+                  subtasks: todo.subtasks.map((subtask) =>
+                    subtask.id === subtaskId
+                      ? {
+                          ...subtask,
+                          memos: [
+                            ...subtask.memos,
+                            {
+                              id: "subtask-memo-" + sequence,
+                              text: body,
+                              createdAt: timestamp,
+                            },
+                          ],
+                        }
+                      : subtask,
+                  ),
+                }
+              : todo,
+          ),
+        );
+      },
+    ),
     setAssignee: vi.fn(async (id: string, assigneeId: string | null) => {
       commit(
         board.state.todos.map((todo: Todo) =>
@@ -249,6 +351,7 @@ describe("一覧の表示形式", () => {
   it("簡潔表示は必要な項目だけを表示し、検索・並び順を維持して詳細を開く。表示形式を再読み込み後も保つ", async () => {
     ready([
       task({
+        subtasks: [],
         notes: [
           {
             id: "memo",
@@ -346,6 +449,144 @@ describe("メモの表示演出", () => {
 });
 
 describe("利用者の操作", () => {
+  it("サブタスクを追加・編集・完了切替・削除し、メモを追記する", async () => {
+    ready([task()]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: messages.subtask.add }),
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.type(
+      within(dialog).getByLabelText(new RegExp("^" + messages.subtask.title)),
+      "資料を確認する",
+    );
+    fireEvent.change(within(dialog).getByLabelText(messages.subtask.deadline), {
+      target: { value: "2026-10-29T10:00" },
+    });
+    const priorityGroup = within(dialog).getByRole("group", {
+      name: messages.subtask.priority,
+    });
+    await user.click(within(priorityGroup).getByRole("radio", { name: /高/ }));
+    await user.click(
+      within(dialog).getByRole("button", { name: messages.subtask.add }),
+    );
+    await waitFor(() =>
+      expect(board.addSubtask).toHaveBeenCalledWith("task", {
+        title: "資料を確認する",
+        status: "todo",
+        priority: "high",
+        deadline: "2026-10-29T01:00:00.000Z",
+      }),
+    );
+    const row = () =>
+      screen
+        .getByRole("button", {
+          name: messages.subtask.editLabel("資料を確認する"),
+        })
+        .closest("li") as HTMLElement;
+    await user.type(
+      within(row()).getByLabelText(messages.subtask.memoInput),
+      "確認済み",
+    );
+    await user.click(
+      within(row()).getByRole("button", { name: messages.subtask.memoSend }),
+    );
+    await waitFor(() =>
+      expect(board.addSubtaskMemo).toHaveBeenCalledWith(
+        "task",
+        "subtask-1",
+        "確認済み",
+      ),
+    );
+    await user.click(
+      within(row()).getByRole("checkbox", {
+        name: messages.subtask.toggleLabel("資料を確認する"),
+      }),
+    );
+    await waitFor(() =>
+      expect(board.updateSubtask).toHaveBeenCalledWith("task", "subtask-1", {
+        status: "done",
+      }),
+    );
+    await user.click(
+      within(row()).getByRole("button", {
+        name: messages.subtask.editLabel("資料を確認する"),
+      }),
+    );
+    const editDialog = screen.getByRole("dialog");
+    const title = within(editDialog).getByLabelText(
+      new RegExp("^" + messages.subtask.title),
+    );
+    await user.clear(title);
+    await user.type(title, "資料を確認する（改）");
+    await user.click(
+      within(editDialog).getByRole("button", { name: messages.subtask.save }),
+    );
+    await waitFor(() =>
+      expect(board.updateSubtask).toHaveBeenCalledWith("task", "subtask-1", {
+        title: "資料を確認する（改）",
+        status: "done",
+        priority: "high",
+        deadline: "2026-10-29T01:00:00.000Z",
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: messages.subtask.deleteLabel("資料を確認する（改）"),
+      }),
+    );
+    const warning = screen.getByRole("alertdialog");
+    expect(warning.textContent).toContain("1件のメモ");
+    await user.click(
+      within(warning).getByRole("button", {
+        name: messages.subtask.delete,
+      }),
+    );
+    await waitFor(() =>
+      expect(board.removeSubtask).toHaveBeenCalledWith("task", "subtask-1"),
+    );
+  });
+
+  it("サブタスクの完了数をカードに表示し、0件では表示しない", () => {
+    ready([
+      task({
+        subtasks: [
+          subtask({ id: "done", status: "done" }),
+          subtask({ id: "active", status: "todo" }),
+        ],
+      }),
+      task({ id: "empty", title: "サブタスクなし" }),
+    ]);
+    render(<App />);
+    const withSubtasks = screen.getByRole("button", {
+      name: "授業の課題の詳細を開く",
+    });
+    expect(within(withSubtasks).getByText("サブタスク 1/2")).toBeTruthy();
+    expect(
+      within(
+        screen.getByRole("button", {
+          name: "サブタスクなしの詳細を開く",
+        }),
+      ).queryByText(/サブタスク \d+\/\d+/),
+    ).toBeNull();
+  });
+
+  it("サブタスクがない詳細画面では専用の空状態を表示する", async () => {
+    ready([task({ subtasks: [] })]);
+    render(<App />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+
+    expect(screen.getByText(messages.subtask.empty)).toBeTruthy();
+    expect(screen.queryByText(messages.filters.empty)).toBeNull();
+  });
+
   it("優先度は左から低・中・高の順で選べて、選んだ値で保存する", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -618,6 +859,7 @@ describe("利用者の操作", () => {
   it("削除の確認後に削除し、取り消すと復元を呼ぶ", async () => {
     ready([
       task({
+        subtasks: [],
         notes: [
           {
             id: "note",

@@ -79,6 +79,7 @@ vi.mock("../cloud/useBoard", async () => {
             {
               ...draft,
               id: crypto.randomUUID(),
+              subtasks: [],
               notes: [],
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -109,6 +110,7 @@ vi.mock("../cloud/useBoard", async () => {
               todo.id === todoId
                 ? {
                     ...todo,
+                    subtasks: [],
                     notes: [
                       ...todo.notes,
                       {
@@ -157,6 +159,7 @@ const task: Todo = {
   deadline: null,
   createdAt: "2026-10-19T00:00:00Z",
   updatedAt: "2026-10-19T00:00:00Z",
+  subtasks: [],
   notes: [
     {
       id: "progress",

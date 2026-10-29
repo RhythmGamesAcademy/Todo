@@ -26,7 +26,15 @@ import {
   STATUS,
   toDateInput,
 } from "./model";
-import type { Priority, Status, Todo, TodoDraft } from "./model";
+import type {
+  Priority,
+  Status,
+  Subtask,
+  SubtaskDraft,
+  SubtaskPatch,
+  Todo,
+  TodoDraft,
+} from "./model";
 import type { Activity, CloudUser, TodoPatch } from "./cloud/types";
 import { computeEntries, Timeline } from "./screens/Timeline";
 export function Mark() {
@@ -156,6 +164,15 @@ export function TodoCard({
           </span>
         )}
         <span className="card-tags">
+          {compact && todo.subtasks.length > 0 && (
+            <span className="subtask-card-count">
+              {messages.subtask.count(
+                todo.subtasks.filter((subtask) => subtask.status === "done")
+                  .length,
+                todo.subtasks.length,
+              )}
+            </span>
+          )}
           {assigneeName && (
             <span className="assignee">
               <UserRound size={13} />
@@ -207,7 +224,18 @@ export function TodoCard({
       )}
       {!compact && (
         <div className="card-footer">
-          <span>{messages.todo.noteCount(todo.notes.length)}</span>
+          <span className="card-counts">
+            <span>{messages.todo.noteCount(todo.notes.length)}</span>
+            {todo.subtasks.length > 0 && (
+              <span>
+                {messages.subtask.count(
+                  todo.subtasks.filter((subtask) => subtask.status === "done")
+                    .length,
+                  todo.subtasks.length,
+                )}
+              </span>
+            )}
+          </span>
           <span className="card-open">
             {messages.todo.open}
             <ArrowUpRight size={16} />
@@ -476,6 +504,195 @@ export function TodoForm({
     </form>
   );
 }
+function SubtaskForm({
+  subtask,
+  onSave,
+  onCancel,
+  onDirty,
+  ask,
+}: {
+  subtask?: Subtask;
+  onSave: (draft: SubtaskDraft) => Promise<boolean>;
+  onCancel: () => void;
+  onDirty: (dirty: boolean) => void;
+  ask: (options: AskOptions) => Promise<boolean>;
+}) {
+  const [title, setTitle] = useState(subtask?.title ?? "");
+  const [noDeadline, setNoDeadline] = useState(
+    subtask ? subtask.deadline === null : false,
+  );
+  const [deadline, setDeadline] = useState(
+    subtask?.deadline ? toDateInput(subtask.deadline) : "",
+  );
+  const [priority, setPriority] = useState<Priority>(
+    subtask?.priority ?? "medium",
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const dirty =
+    title !== (subtask?.title ?? "") ||
+    noDeadline !== (subtask ? subtask.deadline === null : false) ||
+    deadline !== (subtask?.deadline ? toDateInput(subtask.deadline) : "") ||
+    priority !== (subtask?.priority ?? "medium");
+  const prefix = subtask ? "edit-subtask-" : "new-subtask-";
+
+  useEffect(() => {
+    onDirty(dirty);
+  }, [dirty, onDirty]);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError(messages.subtask.titleRequired);
+      return;
+    }
+    let deadlineIso: string | null = null;
+    if (!noDeadline) {
+      if (
+        !deadline ||
+        !Number.isFinite(new Date(deadline).getTime()) ||
+        toDateInput(new Date(deadline).toISOString()) !== deadline
+      ) {
+        setError(messages.subtask.invalidDeadline);
+        return;
+      }
+      deadlineIso = new Date(deadline).toISOString();
+    }
+    if (noDeadline && (!subtask || subtask.deadline !== null)) {
+      const confirmed = await ask({
+        title: messages.subtask.noDeadlineConfirm.title,
+        description: messages.subtask.noDeadlineConfirm.description,
+        confirm: messages.subtask.noDeadlineConfirm.save,
+        cancel: messages.subtask.noDeadlineConfirm.set,
+      });
+      if (!confirmed) {
+        setNoDeadline(false);
+        requestAnimationFrame(() =>
+          document.getElementById(prefix + "deadline")?.focus(),
+        );
+        return;
+      }
+    }
+    setSaving(true);
+    try {
+      if (
+        await onSave({
+          title: title.trim(),
+          status: subtask?.status ?? "todo",
+          priority,
+          deadline: deadlineIso,
+        })
+      )
+        setError("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="subtask-form" onSubmit={submit}>
+      <label className="field-label" htmlFor={prefix + "title"}>
+        {messages.subtask.title}
+        <span className="required">{messages.common.required}</span>
+      </label>
+      <input
+        autoFocus
+        id={prefix + "title"}
+        className="field"
+        value={title}
+        onChange={(e) => {
+          setTitle(e.target.value);
+          setError("");
+        }}
+        maxLength={120}
+        required
+      />
+      <div className="field-heading">
+        <label className="field-label" htmlFor={prefix + "deadline"}>
+          {messages.subtask.deadline}
+        </label>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={noDeadline}
+            onChange={(e) => {
+              setNoDeadline(e.target.checked);
+              setError("");
+            }}
+          />
+          {messages.subtask.noDeadline}
+        </label>
+      </div>
+      {noDeadline ? (
+        <div className="inline-notice">
+          <CalendarDays size={17} />
+          <span>{messages.todo.noDeadline}</span>
+        </div>
+      ) : (
+        <input
+          id={prefix + "deadline"}
+          type="datetime-local"
+          className="field"
+          value={deadline}
+          onChange={(e) => {
+            setDeadline(e.target.value);
+            setError("");
+          }}
+          required
+        />
+      )}
+      <fieldset className="priority-field">
+        <legend className="field-label">{messages.subtask.priority}</legend>
+        <div className="priority-options">
+          {(["low", "medium", "high"] as Priority[]).map((p) => (
+            <label
+              key={p}
+              className={
+                "priority-option priority-" +
+                p +
+                (priority === p ? " selected" : "")
+              }
+            >
+              <input
+                type="radio"
+                name={prefix + "priority"}
+                value={p}
+                checked={priority === p}
+                onChange={() => setPriority(p)}
+              />
+              <Flag size={15} />
+              {PRIORITY[p]}
+              {priority === p && <Check size={16} />}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {error && (
+        <p className="form-error" role="alert">
+          <AlertCircle size={17} />
+          {error}
+        </p>
+      )}
+      <div className="form-actions">
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={onCancel}
+        >
+          {messages.common.cancel}
+        </button>
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={saving}
+        >
+          <Check size={18} />
+          {subtask ? messages.subtask.save : messages.subtask.add}
+        </button>
+      </div>
+    </form>
+  );
+}
 export interface AskOptions {
   title: string;
   description: string;
@@ -491,9 +708,14 @@ export function TodoDetail({
   activities,
   onUpdate,
   onMemo,
+  onSubtaskAdd,
+  onSubtaskUpdate,
+  onSubtaskDelete,
+  onSubtaskMemo,
   onEdit,
   onDelete,
   onDirty,
+  ask,
 }: {
   todo: Todo;
   now: Date;
@@ -502,13 +724,25 @@ export function TodoDetail({
   activities: Activity[];
   onUpdate: (patch: TodoPatch, message: string) => Promise<boolean>;
   onMemo: (body: string) => Promise<boolean>;
+  onSubtaskAdd: (draft: SubtaskDraft) => Promise<boolean>;
+  onSubtaskUpdate: (
+    subtaskId: string,
+    patch: SubtaskPatch,
+    message: string,
+  ) => Promise<boolean>;
+  onSubtaskDelete: (subtask: Subtask) => void;
+  onSubtaskMemo: (subtaskId: string, body: string) => Promise<boolean>;
   onEdit: (setDeadline?: boolean) => void;
   onDelete: () => void;
   onDirty: (dirty: boolean) => void;
+  ask: (options: AskOptions) => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
   const [pendingReveals, setPendingReveals] = useState(0);
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | "new">("");
+  const [subtaskFormDirty, setSubtaskFormDirty] = useState(false);
+  const [subtaskMemos, setSubtaskMemos] = useState<Record<string, string>>({});
   const composer = useRef<HTMLTextAreaElement>(null);
   const previousNotes = useRef(todo.notes.length);
   const timelineCount = useMemo(
@@ -522,8 +756,12 @@ export function TodoDetail({
     ? (assignee?.name ?? messages.todo.assigneeUnknown)
     : null;
   useEffect(() => {
-    onDirty(!!text.trim());
-  }, [text, onDirty]);
+    onDirty(
+      !!text.trim() ||
+        subtaskFormDirty ||
+        Object.values(subtaskMemos).some((memo) => !!memo.trim()),
+    );
+  }, [text, subtaskFormDirty, subtaskMemos, onDirty]);
   useEffect(() => {
     const added = todo.notes.length - previousNotes.current;
     if (added > 0 && pendingReveals > 0) {
@@ -550,6 +788,59 @@ export function TodoDetail({
       return;
     }
     setText("");
+  }
+  async function saveSubtask(draft: SubtaskDraft) {
+    const saved =
+      editingSubtaskId === "new"
+        ? await onSubtaskAdd(draft)
+        : await onSubtaskUpdate(
+            editingSubtaskId,
+            draft,
+            messages.subtask.saved,
+          );
+    if (saved) {
+      setEditingSubtaskId("");
+      setSubtaskFormDirty(false);
+    }
+    return saved;
+  }
+  async function cancelSubtaskForm() {
+    if (
+      subtaskFormDirty &&
+      !(await ask({
+        title: messages.discard.title,
+        description: messages.discard.description,
+        confirm: messages.discard.detail,
+        cancel: messages.discard.keep,
+        danger: true,
+      }))
+    )
+      return;
+    setEditingSubtaskId("");
+    setSubtaskFormDirty(false);
+  }
+  async function editSubtask(subtask: Subtask) {
+    if (
+      (subtaskFormDirty ||
+        Object.values(subtaskMemos).some((memo) => !!memo.trim())) &&
+      !(await ask({
+        title: messages.discard.title,
+        description: messages.discard.description,
+        confirm: messages.discard.detail,
+        cancel: messages.discard.keep,
+        danger: true,
+      }))
+    )
+      return;
+    setSubtaskMemos({});
+    setSubtaskFormDirty(false);
+    setEditingSubtaskId(subtask.id);
+  }
+  async function submitSubtaskMemo(subtaskId: string) {
+    const body = subtaskMemos[subtaskId]?.trim() ?? "";
+    if (!body) return;
+    if (await onSubtaskMemo(subtaskId, body))
+      setSubtaskMemos((memos) => ({ ...memos, [subtaskId]: "" }));
   }
   return (
     <div className="detail-content">
@@ -608,6 +899,163 @@ export function TodoDetail({
             {messages.todo.edit}
           </button>
         </div>
+      </section>
+      <section className="subtasks" aria-labelledby="subtasks-heading">
+        <div className="subtasks-heading">
+          <div className="subtasks-title">
+            <h3 id="subtasks-heading">{messages.subtask.heading}</h3>
+            <span>
+              {messages.subtask.count(
+                todo.subtasks.filter((subtask) => subtask.status === "done")
+                  .length,
+                todo.subtasks.length,
+              )}
+            </span>
+          </div>
+          {editingSubtaskId === "" && (
+            <button
+              className="button button-secondary subtask-add"
+              onClick={() => setEditingSubtaskId("new")}
+            >
+              <Plus size={16} />
+              {messages.subtask.add}
+            </button>
+          )}
+        </div>
+        {editingSubtaskId === "new" && (
+          <SubtaskForm
+            onSave={saveSubtask}
+            onCancel={() => void cancelSubtaskForm()}
+            onDirty={setSubtaskFormDirty}
+            ask={ask}
+          />
+        )}
+        {todo.subtasks.length > 0 && (
+          <ul className="subtask-list">
+            {todo.subtasks.map((subtask) => {
+              const subtaskDeadline = subtask.deadline
+                ? dateText(subtask.deadline, true)
+                : messages.todo.noDeadline;
+              return (
+                <li
+                  className={
+                    "subtask-item " +
+                    (subtask.status === "done" ? "subtask-done" : "")
+                  }
+                  key={subtask.id}
+                >
+                  {editingSubtaskId === subtask.id ? (
+                    <SubtaskForm
+                      subtask={subtask}
+                      onSave={saveSubtask}
+                      onCancel={() => void cancelSubtaskForm()}
+                      onDirty={setSubtaskFormDirty}
+                      ask={ask}
+                    />
+                  ) : (
+                    <>
+                      <div className="subtask-row">
+                        <input
+                          type="checkbox"
+                          checked={subtask.status === "done"}
+                          aria-label={messages.subtask.toggleLabel(
+                            subtask.title,
+                          )}
+                          onChange={(e) =>
+                            void onSubtaskUpdate(
+                              subtask.id,
+                              { status: e.target.checked ? "done" : "todo" },
+                              messages.subtask.stateUpdated,
+                            )
+                          }
+                        />
+                        <div className="subtask-main">
+                          <strong>{subtask.title}</strong>
+                          <div className="subtask-meta">
+                            <span
+                              className={
+                                "priority priority-" + subtask.priority
+                              }
+                            >
+                              <Flag size={13} />
+                              {messages.todo.priorityLabel(
+                                PRIORITY[subtask.priority],
+                              )}
+                            </span>
+                            <span className="subtask-deadline">
+                              <CalendarDays size={13} />
+                              {subtaskDeadline}
+                            </span>
+                            <span className="subtask-memo-count">
+                              <MessageSquare size={13} />
+                              {messages.subtask.memoCount(subtask.memos.length)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="subtask-actions">
+                          <button
+                            className="icon-button"
+                            onClick={() => void editSubtask(subtask)}
+                            aria-label={messages.subtask.editLabel(
+                              subtask.title,
+                            )}
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            className="icon-button danger-icon"
+                            onClick={() => onSubtaskDelete(subtask)}
+                            aria-label={messages.subtask.deleteLabel(
+                              subtask.title,
+                            )}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <form
+                        className="subtask-memo"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void submitSubtaskMemo(subtask.id);
+                        }}
+                      >
+                        <label
+                          className="sr-only"
+                          htmlFor={"subtask-memo-" + subtask.id}
+                        >
+                          {messages.subtask.memoInput}
+                        </label>
+                        <input
+                          id={"subtask-memo-" + subtask.id}
+                          value={subtaskMemos[subtask.id] ?? ""}
+                          maxLength={2000}
+                          placeholder={messages.subtask.memoInput}
+                          onChange={(e) =>
+                            setSubtaskMemos((memos) => ({
+                              ...memos,
+                              [subtask.id]: e.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          type="submit"
+                          className="button button-secondary"
+                          disabled={!subtaskMemos[subtask.id]?.trim()}
+                        >
+                          {messages.subtask.memoSend}
+                        </button>
+                      </form>
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {todo.subtasks.length === 0 && editingSubtaskId === "" && (
+          <p className="subtask-empty">{messages.subtask.empty}</p>
+        )}
       </section>
       <section className="chat" aria-labelledby="notes-heading">
         <div className="chat-heading">

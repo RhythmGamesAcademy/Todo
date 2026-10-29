@@ -26,6 +26,9 @@ import type {
   Filter,
   Sort,
   Status,
+  Subtask,
+  SubtaskDraft,
+  SubtaskPatch,
   Todo,
   TodoDraft,
 } from "./model";
@@ -229,6 +232,48 @@ export default function App() {
     if (!(await act(() => board.addMemo(todoId, body)))) return false;
     setToast({ message: messages.chat.sent });
     return true;
+  }
+  async function addSubtask(todoId: string, draft: SubtaskDraft) {
+    if (!(await act(() => board.addSubtask(todoId, draft)))) return false;
+    setToast({ message: messages.subtask.created });
+    return true;
+  }
+  async function updateSubtask(
+    todoId: string,
+    subtaskId: string,
+    patch: SubtaskPatch,
+    message: string,
+  ) {
+    if (!(await act(() => board.updateSubtask(todoId, subtaskId, patch))))
+      return false;
+    setToast({ message });
+    return true;
+  }
+  async function addSubtaskMemo(
+    todoId: string,
+    subtaskId: string,
+    body: string,
+  ) {
+    if (!(await act(() => board.addSubtaskMemo(todoId, subtaskId, body))))
+      return false;
+    setToast({ message: messages.subtask.memoSent });
+    return true;
+  }
+  async function deleteSubtask(todoId: string, subtask: Subtask) {
+    if (
+      await ask({
+        title: messages.subtask.deleteTitle,
+        description: messages.subtask.deleteDescription(
+          subtask.title,
+          subtask.memos.length,
+        ),
+        confirm: messages.subtask.delete,
+        danger: true,
+      })
+    ) {
+      if (await act(() => board.removeSubtask(todoId, subtask.id)))
+        setToast({ message: messages.subtask.deleted });
+    }
   }
   async function saveDraft(draft: TodoDraft) {
     if (view?.type === "create") {
@@ -626,7 +671,18 @@ export default function App() {
               updateTodo(selected.id, patch, message)
             }
             onMemo={(body) => addMemo(selected.id, body)}
+            onSubtaskAdd={(draft) => addSubtask(selected.id, draft)}
+            onSubtaskUpdate={(subtaskId, patch, message) =>
+              updateSubtask(selected.id, subtaskId, patch, message)
+            }
+            onSubtaskDelete={(subtask) =>
+              void deleteSubtask(selected.id, subtask)
+            }
+            onSubtaskMemo={(subtaskId, body) =>
+              addSubtaskMemo(selected.id, subtaskId, body)
+            }
             onDirty={setDirty}
+            ask={ask}
             onEdit={async (setDeadline = false) => {
               if (await allowDiscard(messages.discard.edit)) {
                 setDirty(false);

@@ -1,4 +1,4 @@
-import type { TodoDraft } from "../model";
+import type { SubtaskDraft, SubtaskPatch, TodoDraft } from "../model";
 import { parseCloudState } from "./parse";
 import { readSession } from "./session";
 import type { Session } from "./session";
@@ -158,6 +158,76 @@ export async function sendMemo(
     jsonInit("POST", withCaller(token, { body })),
   );
 }
+
+export async function createSubtask(
+  token: string,
+  todoId: string,
+  draft: SubtaskDraft,
+): Promise<{ id: string }> {
+  const data = await apiFetch<{ id: string }>(
+    listPath(token) + "/todos/" + encodeURIComponent(todoId) + "/subtasks",
+    jsonInit(
+      "POST",
+      withCaller(token, { ...draft } as Record<string, unknown>),
+    ),
+  );
+  if (!data) throw new ApiError(500, "invalid create response");
+  return { id: data.id };
+}
+
+export async function patchSubtask(
+  token: string,
+  todoId: string,
+  subtaskId: string,
+  patch: SubtaskPatch,
+): Promise<{ revision: number }> {
+  const data = await apiFetch<{ revision: number }>(
+    listPath(token) +
+      "/todos/" +
+      encodeURIComponent(todoId) +
+      "/subtasks/" +
+      encodeURIComponent(subtaskId),
+    jsonInit(
+      "PATCH",
+      withCaller(token, { ...patch } as Record<string, unknown>),
+    ),
+  );
+  return { revision: data?.revision ?? Number.NaN };
+}
+
+export async function deleteSubtask(
+  token: string,
+  todoId: string,
+  subtaskId: string,
+): Promise<void> {
+  await apiFetch<void>(
+    listPath(token) +
+      "/todos/" +
+      encodeURIComponent(todoId) +
+      "/subtasks/" +
+      encodeURIComponent(subtaskId),
+    jsonInit("DELETE", withCaller(token, {})),
+  );
+}
+
+export async function sendSubtaskMemo(
+  token: string,
+  todoId: string,
+  subtaskId: string,
+  body: string,
+): Promise<void> {
+  await apiFetch<void>(
+    listPath(token) +
+      "/todos/" +
+      encodeURIComponent(todoId) +
+      "/subtasks/" +
+      encodeURIComponent(subtaskId) +
+      "/memos",
+    jsonInit("POST", withCaller(token, { body })),
+  );
+}
+
+export const addSubtaskMemo = sendSubtaskMemo;
 
 export async function renameList(token: string, title: string): Promise<void> {
   await apiFetch<void>(

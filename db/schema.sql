@@ -32,6 +32,24 @@ CREATE TABLE todos (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE subtasks (
+  id          UUID PRIMARY KEY,
+  todo_id     UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  status      TEXT NOT NULL CHECK (status IN ('todo', 'done')),
+  priority    TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high')),
+  due         TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE subtask_memos (
+  id          UUID PRIMARY KEY,
+  subtask_id  UUID NOT NULL REFERENCES subtasks(id) ON DELETE CASCADE,
+  body        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE memos (
   id         UUID PRIMARY KEY,
   todo_id    UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
@@ -65,6 +83,9 @@ CREATE TABLE activities (
 
 CREATE INDEX todos_list_id_idx ON todos (list_id);
 CREATE INDEX todos_active_idx ON todos (list_id, deleted_at);
+CREATE INDEX subtasks_todo_id_idx ON subtasks (todo_id);
+CREATE INDEX subtask_memos_subtask_id_idx ON subtask_memos (subtask_id);
+CREATE INDEX subtask_memos_created_at_idx ON subtask_memos (created_at);
 CREATE INDEX memos_todo_id_idx ON memos (todo_id);
 CREATE INDEX activities_list_created_idx ON activities (list_id, created_at);
 CREATE INDEX activities_todo_id_idx ON activities (todo_id);
@@ -77,6 +98,18 @@ DECLARE
   target_list_id UUID;
 BEGIN
   IF TG_TABLE_NAME = 'memos' THEN
+    SELECT t.list_id INTO target_list_id
+    FROM todos t
+    WHERE t.id = CASE WHEN TG_OP = 'DELETE' THEN OLD.todo_id ELSE NEW.todo_id END;
+  ELSIF TG_TABLE_NAME = 'subtask_memos' THEN
+    SELECT t.list_id INTO target_list_id
+    FROM subtasks s
+    JOIN todos t ON t.id = s.todo_id
+    WHERE s.id = CASE
+      WHEN TG_OP = 'DELETE' THEN OLD.subtask_id
+      ELSE NEW.subtask_id
+    END;
+  ELSIF TG_TABLE_NAME = 'subtasks' THEN
     SELECT t.list_id INTO target_list_id
     FROM todos t
     WHERE t.id = CASE WHEN TG_OP = 'DELETE' THEN OLD.todo_id ELSE NEW.todo_id END;
@@ -95,6 +128,14 @@ FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
 
 CREATE TRIGGER memos_bump_revision
 AFTER INSERT OR UPDATE OR DELETE ON memos
+FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
+
+CREATE TRIGGER subtasks_bump_revision
+AFTER INSERT OR UPDATE OR DELETE ON subtasks
+FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
+
+CREATE TRIGGER subtask_memos_bump_revision
+AFTER INSERT OR UPDATE OR DELETE ON subtask_memos
 FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
 
 CREATE TRIGGER users_bump_revision
