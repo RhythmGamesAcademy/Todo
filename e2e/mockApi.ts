@@ -9,8 +9,10 @@ import type {
   CloudState,
   CloudTodo,
   CloudUser,
+  Notification,
   TodoPatch,
 } from "../src/cloud/types";
+import { REQUEST_TAG } from "../src/model";
 import type { Page, Route } from "@playwright/test";
 
 const nowIso = () => new Date().toISOString();
@@ -25,6 +27,7 @@ export interface MockTodoSeed {
   priority?: CloudTodo["priority"];
   status?: CloudTodo["status"];
   assigneeId?: string | null;
+  tags?: string[];
   notes?: Array<{ id: string; text: string; userId?: string | null }>;
 }
 
@@ -36,6 +39,7 @@ interface Board {
   todos: Map<string, CloudTodo>;
   trash: Map<string, CloudTodo>;
   activities: Activity[];
+  notifications: Notification[];
 }
 
 const DRAFT_KEYS = [
@@ -45,12 +49,17 @@ const DRAFT_KEYS = [
   "priority",
   "status",
   "assigneeId",
+  "tags",
 ] as const;
+
+// タグ履歴は API と同じ「、」結合で残す。
+const TAG_SEPARATOR = "、";
 
 type JsonResponder = (status: number, data: unknown) => Promise<void>;
 
 const toCloudTodo = (seed: MockTodoSeed): CloudTodo => {
   const createdAt = nowIso();
+  const tags = seed.tags ?? [];
   return {
     id: seed.id,
     title: seed.title,
@@ -59,6 +68,9 @@ const toCloudTodo = (seed: MockTodoSeed): CloudTodo => {
     priority: seed.priority ?? "medium",
     status: seed.status ?? "todo",
     assigneeId: seed.assigneeId ?? null,
+    tags,
+    approvalStatus: tags.includes(REQUEST_TAG) ? "pending" : null,
+    approvalReason: null,
     createdAt,
     updatedAt: createdAt,
     notes: (seed.notes ?? []).map((note) => ({
@@ -68,6 +80,38 @@ const toCloudTodo = (seed: MockTodoSeed): CloudTodo => {
       userId: note.userId ?? null,
     })),
   };
+};
+
+// 通知1行。宛先ごとに1件(APIと同じ)。actorId は操作者。
+const pushNotification = (
+  board: Board,
+  todoId: string,
+  recipientId: string,
+  actorId: string | null,
+  kind: Notification["kind"],
+  body: string | null,
+) => {
+  board.notifications.push({
+    id: nextId("notification"),
+    todoId,
+    userId: recipientId,
+    actorId,
+    kind,
+    body,
+    createdAt: nowIso(),
+  });
+};
+
+// 承認・否認の宛先側は担当者。操作者自身には送らない。
+const notifyRecipients = (
+  board: Board,
+  todo: CloudTodo,
+  actorId: string | null,
+  kind: Notification["kind"],
+  body: string | null,
+) => {
+  if (!todo.assigneeId || todo.assigneeId === actorId) return;
+  pushNotification(board, todo.id, todo.assigneeId, actorId, kind, body);
 };
 
 export class MockApi {
@@ -97,6 +141,7 @@ export class MockApi {
       todos: new Map(),
       trash: new Map(),
       activities: [],
+      notifications: [],
     };
     for (const seed of options.todos ?? []) {
       board.todos.set(seed.id, toCloudTodo(seed));
@@ -111,6 +156,7 @@ export class MockApi {
       users: board.users,
       todos: [...board.todos.values()],
       activities: [...board.activities],
+      notifications: [...board.notifications],
     };
   }
 
@@ -160,6 +206,7 @@ export class MockApi {
           todos: new Map(),
           trash: new Map(),
           activities: [],
+          notifications: [],
         });
         await json(201, { token: tokenName });
         return;
@@ -206,6 +253,10 @@ export class MockApi {
     }
     if (first === "todos" && second) {
       await this.todoRoute(board, second, third, method, readBody(), ok, json);
+      return;
+    }
+    if (first === "notifications" && method === "POST") {
+      await this.notificationsRoute(route, board, method, readBody(), ok);
       return;
     }
     if (first === "users" && second) {
@@ -256,6 +307,14 @@ export class MockApi {
       return;
     }
     const createdAt = nowIso();
+    const tags =
+      Array.isArray(body.tags) && body.tags.length <= 5
+        ? body.tags
+            .filter((tag): tag is string => typeof tag === "string")
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+            .slice(0, 5)
+        : [];
     const todo: CloudTodo = {
       id: nextId("todo"),
       title,
@@ -275,6 +334,9 @@ export class MockApi {
         typeof body.assigneeId === "string" && body.assigneeId.trim()
           ? body.assigneeId.trim()
           : null,
+      tags,
+      approvalStatus: tags.includes(REQUEST_TAG) ? "pending" : null,
+      approvalReason: null,
       createdAt,
       updatedAt: createdAt,
       notes: [],
@@ -334,7 +396,7 @@ export class MockApi {
     const todo = board.todos.get(todoId);
     if (!todo) return notFound();
     if (action === "memos" && method === "POST") {
-      const text = typeof body.text === "string" ? body.text : "";
+      const text = typeof body.body === "string" ? body.body : "";
       if (!text.trim() || text.length > 2000) {
         await json(400, { error: "invalid memo" });
         return;
@@ -345,19 +407,61 @@ export class MockApi {
         createdAt: nowIso(),
         userId,
       });
+      // メンション(@名前 完全一致)で宛先ごとに通知を積む。送信者は除外。
+      for (const user of board.users) {
+        if (user.id === userId) continue;
+        if (text.includes("@" + user.name))
+          pushNotification(board, todoId, user.id, userId, "mention", text);
+      }
       board.revision++;
       await ok();
       return;
     }
     if (!action && method === "PATCH") {
       const patch = body as TodoPatch;
+      // タグは承認状態の開閉と履歴表記を API に合わせて特別扱いする。
+      const tagBefore = todo.tags ?? [];
+      let tagAfter = tagBefore;
+      if (Array.isArray(patch.tags)) {
+        tagAfter = patch.tags
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+          .slice(0, 5);
+        todo.tags = tagAfter;
+        const hadRequest = tagBefore.includes(REQUEST_TAG);
+        const hasRequest = tagAfter.includes(REQUEST_TAG);
+        if (hasRequest && !hadRequest) {
+          todo.approvalStatus = "pending";
+          todo.approvalReason = null;
+        } else if (!hasRequest && hadRequest) {
+          todo.approvalStatus = null;
+          todo.approvalReason = null;
+        }
+        pushActivity(
+          "todo.updated",
+          "tags",
+          tagBefore.length ? tagBefore.join(TAG_SEPARATOR) : null,
+          tagAfter.length ? tagAfter.join(TAG_SEPARATOR) : null,
+        );
+      }
       const changed = patch as unknown as Record<string, unknown>;
       for (const key of DRAFT_KEYS) {
         if (!(key in changed)) continue;
+        if (key === "tags") continue;
         const before = todo[key];
         const after = changed[key];
         if (after === before) continue;
         (todo as unknown as Record<string, unknown>)[key] = after;
+        // 担当が変わったら新しい担当者に通知を積む(APIと同じ)。
+        if (
+          key === "assigneeId" &&
+          typeof after === "string" &&
+          after &&
+          typeof body.userId === "string" &&
+          after !== body.userId
+        ) {
+          pushNotification(board, todoId, after, body.userId, "todo.assigned", todo.title);
+        }
         pushActivity(
           "todo.updated",
           key,
@@ -370,6 +474,40 @@ export class MockApi {
       await json(200, { revision: board.revision });
       return;
     }
+    if (action === "approve" && method === "POST") {
+      if (!(todo.tags ?? []).includes(REQUEST_TAG)) {
+        await json(400, { error: "todo is not tagged as a request" });
+        return;
+      }
+      const beforeStatus = todo.approvalStatus;
+      todo.approvalStatus = "approved";
+      todo.approvalReason = null;
+      todo.updatedAt = nowIso();
+      board.revision++;
+      pushActivity("approval.approved", "approval", beforeStatus, "approved");
+      notifyRecipients(board, todo, userId, "approval.approved", todo.title);
+      await json(200, { revision: board.revision });
+      return;
+    }
+    if (action === "reject" && method === "POST") {
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      if (!reason) {
+        await json(400, { error: "reason is required" });
+        return;
+      }
+      if (!(todo.tags ?? []).includes(REQUEST_TAG)) {
+        await json(400, { error: "todo is not tagged as a request" });
+        return;
+      }
+      todo.approvalStatus = "rejected";
+      todo.approvalReason = reason;
+      todo.updatedAt = nowIso();
+      board.revision++;
+      pushActivity("approval.rejected", "reason", null, reason);
+      notifyRecipients(board, todo, userId, "approval.rejected", reason);
+      await json(200, { revision: board.revision });
+      return;
+    }
     if (!action && method === "DELETE") {
       board.todos.delete(todoId);
       board.trash.set(todoId, todo);
@@ -379,6 +517,28 @@ export class MockApi {
       return;
     }
     await notFound();
+  }
+
+  private async notificationsRoute(
+    route: Route,
+    board: Board,
+    method: string,
+    body: Record<string, unknown>,
+    ok: () => Promise<void>,
+  ) {
+    // 現状は「全既読」だけ。users の時刻を進めて revision も上げる。
+    const userId = typeof body.userId === "string" ? body.userId : "";
+    const user = board.users.find((candidate) => candidate.id === userId);
+    if (method !== "POST" || !user) {
+      await this.respond(route, 404, { error: "not found" });
+      return;
+    }
+    (user as CloudUser).notificationReadAt = nowIso();
+    board.notifications = board.notifications.filter(
+      (notification) => notification.userId !== userId,
+    );
+    board.revision++;
+    await ok();
   }
 
   private async userRoute(
