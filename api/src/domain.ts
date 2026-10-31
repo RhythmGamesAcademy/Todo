@@ -102,16 +102,14 @@ export function assertText(value: unknown, max: number, field: string): string {
 /**
  * 実際に値が変わったフィールドだけを activity 行にする。
  * 値は機械可読な生値（deadline は ISO 文字列 or null）で、
- * assignee だけは呼び出し側が解決した名前を使う。
- *
- * CloudTodo は assigneeId しか持たないため、変更前の担当者名は
- * 追加の第 4 引数で受け取る（3 引数呼び出しでは null になる）。
+ * assignee だけは呼び出し側が解決した名前の配列を使い、「、」結合で1行に残す。
+ * 単数時代の履歴(「あき」「あきこ」)と表示が揃う。
  */
 export function computeActivities(
   before: CloudTodo,
   patch: TodoPatch,
-  assigneeNameAfter: string | null,
-  assigneeNameBefore: string | null = null,
+  assigneeNamesAfter: readonly string[],
+  assigneeNamesBefore: readonly string[] = [],
 ): ActivityChange[] {
   const changes: ActivityChange[] = [];
   const push = (
@@ -139,8 +137,19 @@ export function computeActivities(
   if (patch.status !== undefined) push("status", before.status, patch.status);
   if (patch.priority !== undefined)
     push("priority", before.priority, patch.priority);
-  if (patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId)
-    push("assignee", assigneeNameBefore, assigneeNameAfter);
+  if (
+    patch.assigneeIds !== undefined &&
+    !sameIds(patch.assigneeIds, before.assigneeIds)
+  )
+    push(
+      "assignee",
+      assigneeNamesBefore.length ? assigneeNamesBefore.join("、") : null,
+      assigneeNamesAfter.length ? assigneeNamesAfter.join("、") : null,
+    );
 
   return changes;
+}
+/** 順序の異なる同じ集合は同一とみなす(並べ替えで履歴を増やさない)。 */
+export function sameIds(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((id) => b.includes(id));
 }

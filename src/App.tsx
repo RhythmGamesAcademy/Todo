@@ -321,18 +321,18 @@ export default function App() {
     if (draft.deadline !== selected.deadline) patch.deadline = draft.deadline;
     if (draft.priority !== selected.priority) patch.priority = draft.priority;
     if (draft.status !== selected.status) patch.status = draft.status;
-    if (draft.assigneeId !== selected.assigneeId)
-      patch.assigneeId = draft.assigneeId;
+    if (draft.assigneeIds.join("\n") !== selected.assigneeIds.join("\n"))
+      patch.assigneeIds = draft.assigneeIds;
     if (draft.tags.join("\n") !== selected.tags.join("\n"))
       patch.tags = draft.tags;
     const fields = Object.keys(patch);
     if (fields.length === 0) {
       setActionError(null);
       setToast({ message: messages.todo.saved });
-    } else if (fields.length === 1 && fields[0] === "assigneeId") {
+    } else if (fields.length === 1 && fields[0] === "assigneeIds") {
       if (
         !(await act(() =>
-          board.setAssignee(selected.id, patch.assigneeId ?? null),
+          board.setAssignees(selected.id, patch.assigneeIds ?? []),
         ))
       )
         return false;

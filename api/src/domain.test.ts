@@ -65,7 +65,7 @@ describe("computeActivities", () => {
     deadline: "2026-10-19T00:00:00.000Z",
     priority: "medium",
     status: "todo",
-    assigneeId: "user-1",
+    assigneeIds: ["user-1"],
     tags: [],
     approvalStatus: null,
     approvalReason: null,
@@ -76,7 +76,7 @@ describe("computeActivities", () => {
   };
 
   it("変更した1フィールドだけ行を返す", () => {
-    expect(computeActivities(before, { title: "新タイトル" }, null)).toEqual([
+    expect(computeActivities(before, { title: "新タイトル" }, [])).toEqual([
       { field: "title", before: "旧タイトル", after: "新タイトル" },
     ]);
   });
@@ -90,7 +90,7 @@ describe("computeActivities", () => {
           status: "done",
           priority: "high",
         },
-        null,
+        [],
       ),
     ).toEqual([
       {
@@ -104,41 +104,60 @@ describe("computeActivities", () => {
   });
 
   it("説明の変更も生値で返す", () => {
-    expect(computeActivities(before, { description: "新説明" }, null)).toEqual([
+    expect(computeActivities(before, { description: "新説明" }, [])).toEqual([
       { field: "description", before: "旧説明", after: "新説明" },
     ]);
   });
 
   it("無変更・空パッチは空配列を返す", () => {
-    expect(computeActivities(before, {}, null)).toEqual([]);
-    expect(computeActivities(before, { title: before.title }, null)).toEqual(
-      [],
-    );
+    expect(computeActivities(before, {}, [])).toEqual([]);
+    expect(computeActivities(before, { title: before.title }, [])).toEqual([]);
     expect(
-      computeActivities(before, { deadline: before.deadline }, null),
+      computeActivities(before, { deadline: before.deadline }, []),
     ).toEqual([]);
     expect(
-      computeActivities(before, { assigneeId: before.assigneeId }, null),
+      computeActivities(before, { assigneeIds: before.assigneeIds }, []),
+    ).toEqual([]);
+    // 順序が違うだけの同じ集合は無変更とみなす。
+    expect(
+      computeActivities(
+        { ...before, assigneeIds: ["user-1", "user-2"] },
+        { assigneeIds: ["user-2", "user-1"] },
+        [],
+      ),
     ).toEqual([]);
   });
 
-  it("assignee は変更前後の名前で1行を返す", () => {
+  it("assignee は変更前後の名前を「、」結合して1行を返す", () => {
     expect(
-      computeActivities(before, { assigneeId: "user-2" }, "はる", "あき"),
+      computeActivities(
+        before,
+        { assigneeIds: ["user-2"] },
+        ["はる"],
+        ["あき"],
+      ),
     ).toEqual([{ field: "assignee", before: "あき", after: "はる" }]);
+    expect(
+      computeActivities(
+        { ...before, assigneeIds: [] },
+        { assigneeIds: ["user-2", "user-3"] },
+        ["はる", "あきこ"],
+        [],
+      ),
+    ).toEqual([{ field: "assignee", before: null, after: "はる、あきこ" }]);
   });
 
   it("assignee の解除は after を null にする", () => {
     expect(
-      computeActivities(before, { assigneeId: null }, null, "あき"),
+      computeActivities(before, { assigneeIds: [] }, [], ["あき"]),
     ).toEqual([{ field: "assignee", before: "あき", after: null }]);
   });
 
   it("タグの差し替えは「、」結合の前後を履歴に出す", () => {
     expect(
-      computeActivities({ ...before, tags: ["設計"] }, { tags: [] }, null),
+      computeActivities({ ...before, tags: ["設計"] }, { tags: [] }, []),
     ).toEqual([{ field: "tags", before: "設計", after: null }]);
-    expect(computeActivities(before, { tags: ["会議"] }, null)).toEqual([
+    expect(computeActivities(before, { tags: ["会議"] }, [])).toEqual([
       { field: "tags", before: null, after: "会議" },
     ]);
   });

@@ -12,7 +12,7 @@ const todo = (extra: Partial<Todo> = {}): Todo => ({
   deadline: "2026-10-30T10:00:00.000Z",
   priority: "medium",
   status: "todo",
-  assigneeId: null,
+  assigneeIds: [],
   tags: [],
   approvalStatus: null,
   approvalReason: null,

@@ -28,6 +28,7 @@ import {
   generateToken,
   parseTags,
   REQUEST_TAG,
+  sameIds,
   toPgTextArray,
 } from "./domain.js";
 import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
@@ -74,7 +75,7 @@ interface TodoRow {
   status: string;
   priority: string;
   due: unknown;
-  assignee_id: string | null;
+  assignee_ids: unknown;
   tags: unknown;
   approval_status: string | null;
   approval_reason: string | null;
@@ -154,7 +155,7 @@ const toCloudTodo = (row: TodoRow): CloudTodo => ({
   deadline: row.due === null ? null : toIso(row.due),
   priority: row.priority as Priority,
   status: row.status as Status,
-  assigneeId: row.assignee_id,
+  assigneeIds: toTextArray(row.assignee_ids),
   tags: toTextArray(row.tags),
   approvalStatus: row.approval_status
     ? (row.approval_status as ApprovalStatus)
@@ -303,6 +304,29 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     return id;
   };
 
+  // 担当者は assigneeIds（ID の配列、順序を保って重複を除く）。
+  // 旧クライアントの単数 assigneeId も受け付けて配列に読み替える。
+  const parseAssigneeIds = async (
+    listId: string,
+    body: Record<string, unknown>,
+  ): Promise<string[]> => {
+    let raw: unknown[] = [];
+    if (body.assigneeIds !== undefined || body.assigneeId === undefined) {
+      if (!Array.isArray(body.assigneeIds))
+        throw new ApiException(400, "assigneeIds must be an array");
+      raw = body.assigneeIds;
+    } else if (body.assigneeId !== null) {
+      raw = [body.assigneeId];
+    }
+    const ids: string[] = [];
+    for (const item of raw) {
+      const id = (await requireUser(listId, parseUserId(item, "assigneeIds")))
+        .id;
+      if (!ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  };
+
   const readRevision = async (listId: string): Promise<number> => {
     const [row] = rowsOf<{ revision: string | number }>(
       await sql`SELECT revision FROM public.lists WHERE id = ${listId}`,
@@ -318,7 +342,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     if (!UUID.test(id)) return null;
     const [todo] = rowsOf<TodoRecordRow>(
       await sql`
-        SELECT id, title, description, status, priority, due, assignee_id,
+        SELECT id, title, description, status, priority, due, assignee_ids,
                tags, approval_status, approval_reason, approval_by, approval_at,
                created_by, created_at, updated_at, deleted_at
         FROM public.todos
@@ -379,7 +403,8 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     actorId: string | null,
   ): string[] => {
     const recipients = new Set<string>();
-    if (row.assignee_id) recipients.add(row.assignee_id);
+    for (const assigneeId of toTextArray(row.assignee_ids))
+      recipients.add(assigneeId);
     if (row.created_by) recipients.add(row.created_by);
     if (actorId) recipients.delete(actorId);
     return [...recipients];
@@ -509,9 +534,14 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     const userId = await readOptionalUserId(body, list.id);
 
     // 履歴の user_id が削除対象を指す場合、users 削除時の FK で NULL になるため
-    // activity を先に挿入する。担当 TODO の assignee_id も同じく NULL になる。
+    // activity を先に挿入する。担当中の TODO の assignee_ids は FK が無いため、
+    // 配列からも先に除いておく。
     await transact([
       addActivity(list.id, null, userId, "user.removed", null, user.name, null),
+      sql`
+        UPDATE public.todos SET assignee_ids = array_remove(assignee_ids, ${user.id}::uuid)
+        WHERE list_id = ${list.id} AND ${user.id} = ANY(assignee_ids)
+      `,
       sql`DELETE FROM public.users WHERE id = ${user.id} AND list_id = ${list.id}`,
     ]);
     return c.json({}, 200);
@@ -529,15 +559,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       body.deadline === undefined ? null : parseDeadline(body.deadline);
     const status = parseEnum(body.status, STATUSES, "status");
     const priority = parseEnum(body.priority, PRIORITIES, "priority");
-    const assigneeId =
-      body.assigneeId === undefined || body.assigneeId === null
-        ? null
-        : (
-            await requireUser(
-              list.id,
-              parseUserId(body.assigneeId, "assigneeId"),
-            )
-          ).id;
+    const assigneeIds = await parseAssigneeIds(list.id, body);
     const userId = await readOptionalUserId(body, list.id);
     const tags = parseTags(body.tags);
     // 「申請」タグ付きで作られたTODOは承認待ちとして始まる。
@@ -546,23 +568,25 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     const id = randomUUID();
     const statements = [
       sql`
-        INSERT INTO public.todos (id, list_id, title, description, status, priority, due, assignee_id, tags, approval_status)
-        VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${assigneeId}, ${toPgTextArray(tags)}::text[], ${approvalStatus})
+        INSERT INTO public.todos (id, list_id, title, description, status, priority, due, assignee_ids, tags, approval_status)
+        VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${toPgTextArray(assigneeIds)}::uuid[], ${toPgTextArray(tags)}::text[], ${approvalStatus})
       `,
       addActivity(list.id, id, userId, "todo.created", null, null, title),
     ];
     // 担当者を設定して作った場合だけ、担当者に作成通知を積む。
-    if (assigneeId !== null && userId !== null && assigneeId !== userId)
-      statements.push(
-        addNotification(
-          list.id,
-          id,
-          assigneeId,
-          userId,
-          "todo.assigned",
-          title,
-        ),
-      );
+    if (userId !== null)
+      for (const assigneeId of assigneeIds)
+        if (assigneeId !== userId)
+          statements.push(
+            addNotification(
+              list.id,
+              id,
+              assigneeId,
+              userId,
+              "todo.assigned",
+              title,
+            ),
+          );
     await transact(statements);
     return c.json({ id }, 201);
   });
@@ -587,35 +611,37 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       patch.priority = parseEnum(body.priority, PRIORITIES, "priority");
     if (body.tags !== undefined) patch.tags = parseTags(body.tags);
 
-    let assigneeAfter: UserRefRow | null | undefined;
-    if (body.assigneeId !== undefined) {
-      assigneeAfter =
-        body.assigneeId === null
-          ? null
-          : await requireUser(
-              list.id,
-              parseUserId(body.assigneeId, "assigneeId"),
-            );
-      patch.assigneeId = assigneeAfter ? assigneeAfter.id : null;
-    }
+    const assigneesAfter: string[] | undefined =
+      body.assigneeIds !== undefined || body.assigneeId !== undefined
+        ? await parseAssigneeIds(list.id, body)
+        : undefined;
+    if (assigneesAfter !== undefined) patch.assigneeIds = assigneesAfter;
     const userId = await readOptionalUserId(body, list.id);
 
     const before = toCloudTodo(row);
     const assigneeChanged =
-      patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId;
-    let assigneeNameBefore: string | null = null;
-    if (assigneeChanged && before.assigneeId) {
-      assigneeNameBefore =
-        (await findUser(list.id, before.assigneeId))?.name ?? null;
+      patch.assigneeIds !== undefined &&
+      !sameIds(patch.assigneeIds, before.assigneeIds);
+    let assigneeNamesBefore: string[] = [];
+    if (assigneeChanged) {
+      assigneeNamesBefore = await Promise.all(
+        before.assigneeIds.map(
+          async (id) => (await findUser(list.id, id))?.name ?? id,
+        ),
+      );
     }
-    const assigneeNameAfter = assigneeChanged
-      ? (assigneeAfter?.name ?? null)
-      : null;
+    const assigneeNamesAfter = assigneeChanged
+      ? await Promise.all(
+          patch.assigneeIds!.map(
+            async (id) => (await findUser(list.id, id))?.name ?? id,
+          ),
+        )
+      : [];
     const changes = computeActivities(
       before,
       patch,
-      assigneeNameAfter,
-      assigneeNameBefore,
+      assigneeNamesAfter,
+      assigneeNamesBefore,
     );
 
     if (changes.length === 0)
@@ -627,13 +653,13 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       deadline: patch.deadline !== undefined,
       status: patch.status !== undefined,
       priority: patch.priority !== undefined,
-      assignee: patch.assigneeId !== undefined,
+      assignee: patch.assigneeIds !== undefined,
       tags: patch.tags !== undefined,
     };
     const nextDeadline =
       patch.deadline !== undefined ? patch.deadline : before.deadline;
-    const nextAssigneeId =
-      patch.assigneeId !== undefined ? patch.assigneeId : before.assigneeId;
+    const nextAssigneeIds =
+      patch.assigneeIds !== undefined ? patch.assigneeIds : before.assigneeIds;
     const nextTags = has.tags ? patch.tags! : before.tags;
     // 申請タグの脱着でのみ承認状態を切り替える。既に pending/approved/rejected
     // のTODOに同タグを残す編集では現在値を保つ(否認済みのまま編集可)。
@@ -654,7 +680,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
           due = CASE WHEN ${has.deadline} THEN ${nextDeadline}::timestamptz ELSE due END,
           status = CASE WHEN ${has.status} THEN ${patch.status ?? before.status} ELSE status END,
           priority = CASE WHEN ${has.priority} THEN ${patch.priority ?? before.priority} ELSE priority END,
-          assignee_id = CASE WHEN ${has.assignee} THEN ${nextAssigneeId}::uuid ELSE assignee_id END,
+          assignee_ids = CASE WHEN ${has.assignee} THEN ${toPgTextArray(nextAssigneeIds)}::uuid[] ELSE assignee_ids END,
           tags = CASE WHEN ${has.tags} THEN ${toPgTextArray(nextTags)}::text[] ELSE tags END,
           approval_status = CASE WHEN ${approvalWillOpen} THEN 'pending' WHEN ${approvalWillClear} THEN NULL ELSE approval_status END,
           approval_reason = CASE WHEN ${approvalWillOpen || approvalWillClear} THEN NULL ELSE approval_reason END,
@@ -675,23 +701,20 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
         ),
       ),
     ];
-    // 担当が変わったら新しい担当者に通知する(自分で自分を選んだ場合は除く)。
-    if (
-      assigneeChanged &&
-      assigneeAfter &&
-      userId !== null &&
-      assigneeAfter.id !== userId
-    )
-      statements.push(
-        addNotification(
-          list.id,
-          row.id,
-          assigneeAfter.id,
-          userId,
-          "todo.assigned",
-          (patch.title ?? before.title) as string,
-        ),
-      );
+    // 新たに追加された担当者に通知する(自分で自分を選んだ場合は除く)。
+    if (assigneeChanged && userId !== null)
+      for (const assigneeId of patch.assigneeIds!)
+        if (!before.assigneeIds.includes(assigneeId) && assigneeId !== userId)
+          statements.push(
+            addNotification(
+              list.id,
+              row.id,
+              assigneeId,
+              userId,
+              "todo.assigned",
+              (patch.title ?? before.title) as string,
+            ),
+          );
     await transact(statements);
     return c.json({ revision: await readRevision(list.id) });
   });
@@ -1039,7 +1062,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       notificationsResult,
     ] = await Promise.all([
       sql`SELECT id, name, created_at, notification_read_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
-      sql`SELECT id, title, description, status, priority, due, assignee_id, tags, approval_status, approval_reason, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
+      sql`SELECT id, title, description, status, priority, due, assignee_ids, tags, approval_status, approval_reason, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
       sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
       // 親TODOのソフト削除中は、復元までサブタスクも取得結果から隠す。
       sql`SELECT s.id, s.todo_id, s.title, s.status, s.priority, s.due, s.created_at, s.updated_at FROM public.subtasks s JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY s.created_at, s.id`,

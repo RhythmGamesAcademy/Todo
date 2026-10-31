@@ -151,8 +151,8 @@ export function ManageScreen({
         <ul className="manage-members">
           {state.users.map((user) => {
             const isSelf = user.id === meId;
-            const assigned = state.todos.filter(
-              (todo) => todo.assigneeId === user.id,
+            const assigned = state.todos.filter((todo) =>
+              todo.assigneeIds.includes(user.id),
             ).length;
             const draft = draftOf(user);
             return (

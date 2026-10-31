@@ -114,7 +114,7 @@ export async function fetchRevision(token: string): Promise<number> {
 
 export async function createTodo(
   token: string,
-  draft: TodoDraft & { assigneeId: string | null },
+  draft: TodoDraft,
 ): Promise<{ id: string }> {
   const data = await apiFetch<{ id: string }>(
     listPath(token) + "/todos",

@@ -114,6 +114,18 @@ const validateTags = (x: unknown): x is string[] | undefined => {
   );
 };
 
+// 担当者は文字列IDの配列。旧API/旧バックアップの単数 assigneeId は
+// validateTodo の後で配列に読み替えるため、ここでは形だけを見る。
+// ID がメンバー実在を検証しないのは、削除済みメンバーを旧バックアップが
+// 保持しているケース(不明なメンバー表示)を許容するため。
+const validateAssigneeIds = (x: unknown): x is string[] | undefined => {
+  if (x === undefined) return true;
+  if (!Array.isArray(x)) return false;
+  return x.every((id) => validId(id));
+};
+const validateLegacyAssigneeId = (x: unknown): x is string | null | undefined =>
+  x === undefined || x === null || validId(x);
+
 function validateNote(value: unknown, ids: Set<string>): void {
   if (
     !record(value) ||
@@ -173,7 +185,9 @@ function validateTodo(value: unknown, ids: Set<string>): void {
     !(value.deadline === null || isIsoTimestamp(value.deadline)) ||
     !oneOf(PRIORITIES, value.priority) ||
     !oneOf(STATUSES, value.status) ||
-    !(value.assigneeId === null || validId(value.assigneeId)) ||
+    !(value.assigneeIds !== undefined || value.assigneeId !== undefined) ||
+    !validateAssigneeIds(value.assigneeIds) ||
+    !validateLegacyAssigneeId(value.assigneeId) ||
     !validateTags(value.tags) ||
     !(
       value.approvalStatus === undefined ||
@@ -257,6 +271,21 @@ export function parseCloudState(input: unknown): CloudState {
       approvalStatus: todo.approvalStatus ?? null,
       approvalReason: todo.approvalReason ?? null,
       subtasks: todo.subtasks ?? [],
+      // 複数担当は新フィールド assigneeIds。旧単数 assigneeId は
+      // 順序を保ったまま配列に読み替えて後段を単純にする。
+      assigneeIds: normalizeAssigneeIds(todo.assigneeIds, todo.assigneeId),
     })),
   } as unknown as CloudState;
+}
+
+function normalizeAssigneeIds(
+  assigneeIds: unknown,
+  legacyAssigneeId: unknown,
+): string[] {
+  if (assigneeIds === undefined) {
+    return legacyAssigneeId === null ? [] : [String(legacyAssigneeId)];
+  }
+  const ids: string[] = [];
+  for (const id of assigneeIds as string[]) if (!ids.includes(id)) ids.push(id);
+  return ids;
 }

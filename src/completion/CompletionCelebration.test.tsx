@@ -126,10 +126,12 @@ vi.mock("../cloud/useBoard", async () => {
             ),
           );
         },
-        setAssignee: async (id: string, assigneeId: string | null) => {
+        setAssignees: async (id: string, assigneeIds: string[]) => {
           write(
             todos.map((todo) =>
-              todo.id === id ? { ...todo, assigneeId, updatedAt: now() } : todo,
+              todo.id === id
+                ? { ...todo, assigneeIds, updatedAt: now() }
+                : todo,
             ),
           );
         },
@@ -155,7 +157,7 @@ const task: Todo = {
   description: "提出前の確認",
   status: "doing",
   priority: "medium",
-  assigneeId: null,
+  assigneeIds: [],
   deadline: null,
   tags: [],
   approvalStatus: null,

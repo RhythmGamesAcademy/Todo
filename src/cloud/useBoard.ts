@@ -34,7 +34,7 @@ export type Board =
   | { phase: "ready"; state: CloudState; me: Session };
 
 export type BoardActions = {
-  addTodo: (draft: TodoDraft & { assigneeId: string | null }) => Promise<void>;
+  addTodo: (draft: TodoDraft) => Promise<void>;
   updateTodo: (id: string, patch: TodoPatch) => Promise<void>;
   removeTodo: (id: string) => Promise<void>;
   undoRemove: (id: string) => Promise<void>;
@@ -55,7 +55,7 @@ export type BoardActions = {
   removeBoard: () => Promise<void>;
   renameMember: (id: string, name: string) => Promise<void>;
   removeMember: (id: string) => Promise<void>;
-  setAssignee: (id: string, assigneeId: string | null) => Promise<void>;
+  setAssignees: (id: string, assigneeIds: string[]) => Promise<void>;
   approveTodo: (id: string) => Promise<void>;
   rejectTodo: (id: string, reason: string) => Promise<void>;
   markNotificationsRead: () => Promise<void>;
@@ -163,8 +163,7 @@ export function useBoard(
   }, []);
 
   const addTodo = useCallback(
-    (draft: TodoDraft & { assigneeId: string | null }) =>
-      run((current) => createTodo(current, draft)),
+    (draft: TodoDraft) => run((current) => createTodo(current, draft)),
     [run],
   );
   const updateTodo = useCallback(
@@ -222,8 +221,8 @@ export function useBoard(
     (id: string) => run((current) => removeUser(current, id)),
     [run],
   );
-  const setAssignee = useCallback(
-    (id: string, assigneeId: string | null) => updateTodo(id, { assigneeId }),
+  const setAssignees = useCallback(
+    (id: string, assigneeIds: string[]) => updateTodo(id, { assigneeIds }),
     [updateTodo],
   );
   const approveTodo = useCallback(
@@ -256,7 +255,7 @@ export function useBoard(
     removeBoard,
     renameMember,
     removeMember,
-    setAssignee,
+    setAssignees,
     approveTodo,
     rejectTodo,
     markNotificationsRead,

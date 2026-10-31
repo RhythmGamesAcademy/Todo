@@ -26,7 +26,7 @@ export interface MockTodoSeed {
   deadline?: string | null;
   priority?: CloudTodo["priority"];
   status?: CloudTodo["status"];
-  assigneeId?: string | null;
+  assigneeIds?: string[];
   tags?: string[];
   notes?: Array<{ id: string; text: string; userId?: string | null }>;
 }
@@ -48,11 +48,11 @@ const DRAFT_KEYS = [
   "deadline",
   "priority",
   "status",
-  "assigneeId",
+  "assigneeIds",
   "tags",
 ] as const;
 
-// タグ履歴は API と同じ「、」結合で残す。
+// タグ・担当者履歴は API と同じ「、」結合で残す。
 const TAG_SEPARATOR = "、";
 
 type JsonResponder = (status: number, data: unknown) => Promise<void>;
@@ -67,7 +67,7 @@ const toCloudTodo = (seed: MockTodoSeed): CloudTodo => {
     deadline: seed.deadline ?? null,
     priority: seed.priority ?? "medium",
     status: seed.status ?? "todo",
-    assigneeId: seed.assigneeId ?? null,
+    assigneeIds: seed.assigneeIds ?? [],
     tags,
     approvalStatus: tags.includes(REQUEST_TAG) ? "pending" : null,
     approvalReason: null,
@@ -102,7 +102,14 @@ const pushNotification = (
   });
 };
 
-// 承認・否認の宛先側は担当者。操作者自身には送らない。
+// 承認・否認の宛先側は担当者(各担当者ごと)。操作者自身には送らない。
+const memberNames = (board: Board, ids: readonly string[]): string | null =>
+  ids.length
+    ? ids
+        .map((id) => board.users.find((user) => user.id === id)?.name ?? id)
+        .join(TAG_SEPARATOR)
+    : null;
+
 const notifyRecipients = (
   board: Board,
   todo: CloudTodo,
@@ -110,8 +117,9 @@ const notifyRecipients = (
   kind: Notification["kind"],
   body: string | null,
 ) => {
-  if (!todo.assigneeId || todo.assigneeId === actorId) return;
-  pushNotification(board, todo.id, todo.assigneeId, actorId, kind, body);
+  for (const assigneeId of todo.assigneeIds ?? [])
+    if (assigneeId !== actorId)
+      pushNotification(board, todo.id, assigneeId, actorId, kind, body);
 };
 
 export class MockApi {
@@ -330,10 +338,12 @@ export class MockApi {
         body.status === "doing" || body.status === "done"
           ? body.status
           : "todo",
-      assigneeId:
-        typeof body.assigneeId === "string" && body.assigneeId.trim()
-          ? body.assigneeId.trim()
-          : null,
+      assigneeIds: Array.isArray(body.assigneeIds)
+        ? body.assigneeIds
+            .filter((id): id is string => typeof id === "string" && !!id.trim())
+            .map((id) => id.trim())
+            .filter((id, index, all) => all.indexOf(id) === index)
+        : [],
       tags,
       approvalStatus: tags.includes(REQUEST_TAG) ? "pending" : null,
       approvalReason: null,
@@ -353,6 +363,19 @@ export class MockApi {
       after: null,
       createdAt: nowIso(),
     });
+    // 担当者付きで作られたTODOは新しい担当者に通知を積む(APIと同じ)。
+    if (typeof body.userId === "string") {
+      for (const assigneeId of todo.assigneeIds)
+        if (assigneeId !== body.userId)
+          pushNotification(
+            board,
+            todo.id,
+            assigneeId,
+            body.userId,
+            "todo.assigned",
+            todo.title,
+          );
+    }
     await json(201, { id: todo.id });
   }
 
@@ -448,20 +471,43 @@ export class MockApi {
       for (const key of DRAFT_KEYS) {
         if (!(key in changed)) continue;
         if (key === "tags") continue;
+        if (key === "assigneeIds") {
+          // 複数担当は配列。要素集合の同一性(API と同じ規則)で変化を判定し、
+          // 追加された担当者に通知を積む。
+          const before = todo.assigneeIds ?? [];
+          const after = Array.isArray(changed[key])
+            ? (changed[key] as string[])
+            : [];
+          if (
+            after.length === before.length &&
+            after.every((id) => before.includes(id))
+          )
+            continue;
+          todo.assigneeIds = after;
+          if (typeof body.userId === "string") {
+            for (const id of after)
+              if (!before.includes(id) && id !== body.userId)
+                pushNotification(
+                  board,
+                  todoId,
+                  id,
+                  body.userId,
+                  "todo.assigned",
+                  todo.title,
+                );
+          }
+          pushActivity(
+            "todo.updated",
+            "assignee",
+            memberNames(board, before),
+            memberNames(board, after),
+          );
+          continue;
+        }
         const before = todo[key];
         const after = changed[key];
         if (after === before) continue;
         (todo as unknown as Record<string, unknown>)[key] = after;
-        // 担当が変わったら新しい担当者に通知を積む(APIと同じ)。
-        if (
-          key === "assigneeId" &&
-          typeof after === "string" &&
-          after &&
-          typeof body.userId === "string" &&
-          after !== body.userId
-        ) {
-          pushNotification(board, todoId, after, body.userId, "todo.assigned", todo.title);
-        }
         pushActivity(
           "todo.updated",
           key,
@@ -562,9 +608,11 @@ export class MockApi {
     }
     if (method === "DELETE") {
       board.users = board.users.filter((candidate) => candidate.id !== userId);
-      // 削除されたメンバーが担当中のTODOは未割り当てに戻る(ManageScreen の仕様)。
+      // 削除されたメンバーが担当中のTODOは担当配列から除く(ManageScreen の仕様)。
       for (const todo of board.todos.values()) {
-        if (todo.assigneeId === userId) todo.assigneeId = null;
+        todo.assigneeIds = (todo.assigneeIds ?? []).filter(
+          (id) => id !== userId,
+        );
       }
       board.revision++;
       await this.respond(route, 200, {});

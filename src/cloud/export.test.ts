@@ -9,7 +9,7 @@ const todo: CloudTodo = {
   deadline: "2026-10-30T01:00:00.000Z",
   priority: "high",
   status: "doing",
-  assigneeId: "user-1",
+  assigneeIds: ["user-1"],
   tags: [],
   approvalStatus: null,
   approvalReason: null,
@@ -73,7 +73,7 @@ describe("クラウド版の書き出し", () => {
     const result = buildCloudExport(state, "2026-10-20T12:34:56.000Z");
     expect(result.todos).toEqual(state.todos);
     expect(result.todos[0].notes[0].text).toBe("メモ");
-    expect(result.todos[0].assigneeId).toBe("user-1");
+    expect(result.todos[0].assigneeIds).toEqual(["user-1"]);
     expect(result.users).toEqual(state.users);
   });
 

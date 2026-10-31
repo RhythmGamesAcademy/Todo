@@ -20,7 +20,7 @@ const state: CloudState = {
       deadline: null,
       priority: "medium",
       status: "todo",
-      assigneeId: "user-1",
+      assigneeIds: ["user-1"],
       tags: [],
       approvalStatus: null,
       approvalReason: null,

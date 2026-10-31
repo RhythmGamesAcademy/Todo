@@ -108,7 +108,7 @@ const task = (extra: Partial<Todo> = {}): Todo => ({
   deadline: "2026-10-30T10:00:00.000Z",
   priority: "high",
   status: "doing",
-  assigneeId: null,
+  assigneeIds: [],
   tags: [],
   approvalStatus: null,
   approvalReason: null,
@@ -305,10 +305,12 @@ function ready(todos: Todo[], overrides: Record<string, unknown> = {}) {
         );
       },
     ),
-    setAssignee: vi.fn(async (id: string, assigneeId: string | null) => {
+    setAssignees: vi.fn(async (id: string, assigneeIds: string[]) => {
       commit(
         board.state.todos.map((todo: Todo) =>
-          todo.id === id ? { ...todo, assigneeId, updatedAt: timestamp } : todo,
+          todo.id === id
+            ? { ...todo, assigneeIds, updatedAt: timestamp }
+            : todo,
         ),
       );
     }),
@@ -894,10 +896,10 @@ describe("利用者の操作", () => {
   });
   it("担当者の絞り込みが効き、カードに名前を表示する。削除済みは不明と表示する", async () => {
     ready([
-      task({ id: "mine", title: "自分の課題", assigneeId: "me" }),
-      task({ id: "other", title: "佐藤の課題", assigneeId: "other" }),
-      task({ id: "none", title: "未割当の課題", assigneeId: null }),
-      task({ id: "ghost", title: "削除済みの課題", assigneeId: "ghost" }),
+      task({ id: "mine", title: "自分の課題", assigneeIds: ["me"] }),
+      task({ id: "other", title: "佐藤の課題", assigneeIds: ["other"] }),
+      task({ id: "none", title: "未割当の課題", assigneeIds: [] }),
+      task({ id: "ghost", title: "削除済みの課題", assigneeIds: ["ghost"] }),
     ]);
     const user = userEvent.setup();
     render(<App />);
@@ -930,6 +932,54 @@ describe("利用者の操作", () => {
       screen.getAllByRole("button", { name: /の詳細を開く$/ }),
     ).toHaveLength(4);
   });
+  it("複数人の担当TODOは担当者それぞれの絞り込みに一致する", async () => {
+    ready([
+      task({
+        id: "shared",
+        title: "共同の課題",
+        assigneeIds: ["me", "other"],
+      }),
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.selectOptions(screen.getByLabelText("担当者"), "me");
+    expect(
+      screen.getByRole("button", { name: "共同の課題の詳細を開く" }),
+    ).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("担当者"), "other");
+    expect(
+      screen.getByRole("button", { name: "共同の課題の詳細を開く" }),
+    ).toBeTruthy();
+    await user.selectOptions(screen.getByLabelText("担当者"), "none");
+    expect(
+      screen.queryByRole("button", { name: "共同の課題の詳細を開く" }),
+    ).toBeNull();
+  });
+  it("カードと詳細に複数の担当者名を並べて表示する", async () => {
+    ready([
+      task({
+        id: "shared",
+        title: "共同の課題",
+        assigneeIds: ["me", "other", "ghost"],
+      }),
+    ]);
+    render(<App />);
+    const card = screen.getByRole("button", {
+      name: "共同の課題の詳細を開く",
+    });
+    expect(within(card).getByText("自分")).toBeTruthy();
+    expect(within(card).getByText("佐藤")).toBeTruthy();
+    expect(within(card).getByText(messages.todo.assigneeUnknown)).toBeTruthy();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "共同の課題の詳細を開く" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("自分")).toBeTruthy();
+    expect(within(dialog).getByText("佐藤")).toBeTruthy();
+    expect(
+      within(dialog).getByText(messages.todo.assigneeUnknown),
+    ).toBeTruthy();
+  });
   it("作成時に担当者を選ぶとその担当者で保存する", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -938,9 +988,12 @@ describe("利用者の操作", () => {
     fireEvent.change(screen.getByLabelText("期限"), {
       target: { value: "2026-10-30T23:59" },
     });
-    await user.selectOptions(
-      within(screen.getByRole("dialog")).getByLabelText("担当者"),
-      "other",
+    await user.click(
+      within(
+        within(screen.getByRole("dialog")).getByRole("group", {
+          name: "担当者",
+        }),
+      ).getByRole("checkbox", { name: "佐藤" }),
     );
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
@@ -948,7 +1001,7 @@ describe("利用者の操作", () => {
       }),
     );
     await waitFor(() => expect(board.addTodo).toHaveBeenCalledTimes(1));
-    expect(board.addTodo.mock.calls[0][0].assigneeId).toBe("other");
+    expect(board.addTodo.mock.calls[0][0].assigneeIds).toEqual(["other"]);
     expect(
       within(
         screen.getByRole("button", {
@@ -1001,7 +1054,7 @@ describe("編集の保存経路", () => {
       title: "授業の課題（改）",
       description: "クラウド同期を確認する",
     });
-    expect(board.setAssignee).not.toHaveBeenCalled();
+    expect(board.setAssignees).not.toHaveBeenCalled();
     const detail = screen.getByRole("dialog");
     expect(
       within(detail).getByRole("heading", { name: "授業の課題（改）" }),
@@ -1010,28 +1063,53 @@ describe("編集の保存経路", () => {
     expect(within(detail).getByText(messages.todo.saved)).toBeTruthy();
   });
 
-  it("担当者だけを変えたときは setAssignee を呼び、updateTodo は呼ばない", async () => {
+  it("担当者だけを変えたときは setAssignees を呼び、updateTodo は呼ばない", async () => {
     ready([task()]);
     const user = userEvent.setup();
     render(<App />);
     const dialog = await openEdit(user);
-    await user.selectOptions(
-      within(dialog).getByLabelText(messages.todo.assignee),
-      "other",
+    await user.click(
+      within(
+        within(dialog).getByRole("group", { name: messages.todo.assignee }),
+      ).getByRole("checkbox", { name: "佐藤" }),
     );
     await user.click(
       within(dialog).getByRole("button", { name: messages.todo.save }),
     );
     await waitFor(() =>
-      expect(board.setAssignee).toHaveBeenCalledWith("task", "other"),
+      expect(board.setAssignees).toHaveBeenCalledWith("task", ["other"]),
     );
-    expect(board.setAssignee).toHaveBeenCalledTimes(1);
+    expect(board.setAssignees).toHaveBeenCalledTimes(1);
     expect(board.updateTodo).not.toHaveBeenCalled();
     const detail = screen.getByRole("dialog");
     expect(
       within(detail).getByRole("heading", { name: "授業の課題" }),
     ).toBeTruthy();
     expect(within(detail).getByText(messages.todo.saved)).toBeTruthy();
+  });
+
+  it("担当者を複数選ぶと配列のまま setAssignees を呼び、updateTodo は呼ばない", async () => {
+    ready([task()]);
+    const user = userEvent.setup();
+    render(<App />);
+    const dialog = await openEdit(user);
+    const assignees = within(dialog).getByRole("group", {
+      name: messages.todo.assignee,
+    });
+    await user.click(within(assignees).getByRole("checkbox", { name: "自分" }));
+    await user.click(within(assignees).getByRole("checkbox", { name: "佐藤" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: messages.todo.save }),
+    );
+    await waitFor(() =>
+      expect(board.setAssignees).toHaveBeenCalledWith("task", ["me", "other"]),
+    );
+    expect(board.setAssignees).toHaveBeenCalledTimes(1);
+    expect(board.updateTodo).not.toHaveBeenCalled();
+    const detail = screen.getByRole("dialog");
+    expect(
+      within(detail).getByRole("heading", { name: "授業の課題" }),
+    ).toBeTruthy();
   });
 
   it("保存に失敗したら入力を残してエラーを表示し、詳細へ戻らない", async () => {

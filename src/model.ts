@@ -40,7 +40,8 @@ export interface Todo {
   deadline: string | null;
   priority: Priority;
   status: Status;
-  assigneeId: string | null;
+  /** 担当者IDの配列。空配列は未割り当て。 */
+  assigneeIds: string[];
   tags: string[];
   approvalStatus: ApprovalStatus | null;
   approvalReason: string | null;
@@ -55,7 +56,8 @@ export interface TodoDraft {
   deadline: string | null;
   priority: Priority;
   status: Status;
-  assigneeId: string | null;
+  /** 担当者IDの配列。空配列は未割り当て。 */
+  assigneeIds: string[];
   tags: string[];
 }
 export interface SubtaskDraft {
@@ -143,8 +145,8 @@ export function selectTodos(
         matches &&
         (assignee === "any" ||
           (assignee === "none"
-            ? t.assigneeId === null
-            : t.assigneeId === assignee)) &&
+            ? t.assigneeIds.length === 0
+            : t.assigneeIds.includes(assignee))) &&
         (!query ||
           [t.title, t.description, ...t.notes.map((n) => n.text)].some((s) =>
             s.toLocaleLowerCase().includes(query),

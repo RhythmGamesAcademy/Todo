@@ -920,6 +920,43 @@ input[type="checkbox"] {
   width: 1px;
   height: 1px;
 }
+.assignee-field {
+  margin-top: 23px;
+  margin-bottom: 23px;
+}
+.assignee-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.assignee-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #e0e6ef;
+  border-radius: 11px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.assignee-option:hover {
+  background: #f5f9ff;
+}
+.assignee-option.selected {
+  border-color: #6d9ee2;
+  background: #edf4ff;
+  box-shadow: 0 0 0 1px #6d9ee2;
+}
+.assignee-option:focus-within {
+  outline: 3px solid #78aaf5;
+  outline-offset: 3px;
+}
+.assignee-option input {
+  position: static;
+  accent-color: #4a86d3;
+}
 .form-actions {
   display: flex;
   align-items: center;

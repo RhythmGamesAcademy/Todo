@@ -21,7 +21,7 @@ const make = (
   deadline,
   priority,
   status: "todo",
-  assigneeId: null,
+  assigneeIds: [],
   tags: [],
   approvalStatus: null,
   approvalReason: null,
@@ -111,16 +111,22 @@ describe("TODOの表示と保存", () => {
   it("selectTodos filters by assignee", () => {
     const todos = [
       make("unassigned", null),
-      { ...make("assigned", null), assigneeId: "u1" },
+      { ...make("assigned", null), assigneeIds: ["u1"] },
+      { ...make("shared", null), assigneeIds: ["u1", "u2"] },
     ];
     expect(
       selectTodos(todos, "all", "", "deadline", now, "none").map(
-        (t) => t.assigneeId,
+        (t) => t.assigneeIds,
       ),
-    ).toEqual([null]);
-    expect(selectTodos(todos, "all", "", "deadline", now, "u1").length).toBe(1);
+    ).toEqual([[]]);
+    expect(
+      selectTodos(todos, "all", "", "deadline", now, "u1").map((t) => t.id),
+    ).toEqual(["assigned", "shared"]);
+    expect(
+      selectTodos(todos, "all", "", "deadline", now, "u2").map((t) => t.id),
+    ).toEqual(["shared"]);
     expect(selectTodos(todos, "all", "", "deadline", now, "any").length).toBe(
-      2,
+      3,
     );
   });
   it("今日が期限の一覧には完了済みを含めない", () => {

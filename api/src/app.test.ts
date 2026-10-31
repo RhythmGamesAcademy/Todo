@@ -175,14 +175,14 @@ describeDb("共有リストAPI", () => {
     expect(await res.json()).toMatchObject({ error: expect.any(String) });
   });
 
-  it("TODO作成は assigneeId:null / notes:[] で取得でき、作成履歴が残る", async () => {
+  it("TODO作成は assigneeIds:[] / notes:[] で取得でき、作成履歴が残る", async () => {
     const res = await postTodo({
       title: "牛乳を買う",
       description: "スーパーで",
       deadline: "2026-10-20T12:00:00.000Z",
       priority: "medium",
       status: "todo",
-      assigneeId: null,
+      assigneeIds: [],
       userId: creatorId,
     });
     expect(res.status).toBe(201);
@@ -198,7 +198,7 @@ describeDb("共有リストAPI", () => {
       deadline: "2026-10-20T12:00:00.000Z",
       priority: "medium",
       status: "todo",
-      assigneeId: null,
+      assigneeIds: [],
       subtasks: [],
       notes: [],
     });
@@ -365,7 +365,7 @@ describeDb("共有リストAPI", () => {
     const before = await getState();
     const res = await patchTodo(todoId, {
       status: "doing",
-      assigneeId: creatorId,
+      assigneeIds: [creatorId],
       userId: creatorId,
     });
     expect(res.status).toBe(200);
@@ -375,7 +375,7 @@ describeDb("共有リストAPI", () => {
     const state = await getState();
     expect(state.list.revision).toBe(body.revision);
     const todo = state.todos.find((item: { id: string }) => item.id === todoId);
-    expect(todo).toMatchObject({ status: "doing", assigneeId: creatorId });
+    expect(todo).toMatchObject({ status: "doing", assigneeIds: [creatorId] });
 
     const updates = state.activities.filter(
       (item: { kind: string; todoId: string | null }) =>
@@ -398,6 +398,62 @@ describeDb("共有リストAPI", () => {
         }),
       ]),
     );
+  });
+
+  it("担当者のPATCHは追加担当に通知し、履歴は名前を「、」結合して残す", async () => {
+    const join = async (name: string) => {
+      const res = await app.request(`/api/lists/${token}/join`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      expect(res.status).toBe(200);
+      return (await res.json()) as { userId: string };
+    };
+    const yuki = await join("ゆき");
+    const takeshi = await join("たけし");
+
+    const created = await postTodo({
+      title: "共同のTODO",
+      status: "todo",
+      priority: "low",
+      assigneeIds: [],
+      userId: creatorId,
+    });
+    expect(created.status).toBe(201);
+    const id = ((await created.json()) as { id: string }).id;
+
+    const res = await patchTodo(id, {
+      assigneeIds: [yuki.userId, takeshi.userId],
+      userId: creatorId,
+    });
+    expect(res.status).toBe(200);
+
+    const state = await getState();
+    const todo = state.todos.find((item: { id: string }) => item.id === id);
+    expect(todo).toMatchObject({
+      assigneeIds: [yuki.userId, takeshi.userId],
+    });
+
+    const activities = state.activities.filter(
+      (item: { kind: string; todoId: string | null; field: string | null }) =>
+        item.kind === "todo.updated" &&
+        item.todoId === id &&
+        item.field === "assignee",
+    );
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toMatchObject({
+      before: null,
+      after: "ゆき、たけし",
+    });
+
+    const notifications = (
+      await db.sql`SELECT user_id FROM public.notifications WHERE todo_id = ${id}`
+    ).rows as Array<{ user_id: string }>;
+    expect(notifications.map((row) => row.user_id)).toEqual([
+      yuki.userId,
+      takeshi.userId,
+    ]);
   });
 
   it("同一TODOへの連続PATCHは両方200で後勝ちになる", async () => {
@@ -639,7 +695,7 @@ describeDb("共有リストAPI", () => {
     });
   });
 
-  it("メンバー削除は担当TODOを未割当にし、履歴とメモのuserIdをNULLで残す", async () => {
+  it("メンバー削除は担当TODOの担当配列から除き、履歴とメモのuserIdをNULLで残す", async () => {
     const joined = await app.request(`/api/lists/${token}/join`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -651,7 +707,7 @@ describeDb("共有リストAPI", () => {
       title: "ゆいの担当",
       status: "todo",
       priority: "low",
-      assigneeId: yui.userId,
+      assigneeIds: [yui.userId, creatorId],
       userId: creatorId,
     });
     expect(created.status).toBe(201);
@@ -682,7 +738,10 @@ describeDb("共有リストAPI", () => {
     ).toBeUndefined();
     expect(
       state.todos.find((item: { id: string }) => item.id === todo.id),
-    ).toMatchObject({ assigneeId: null, notes: [{ userId: null }] });
+    ).toMatchObject({
+      assigneeIds: [creatorId],
+      notes: [{ userId: null }],
+    });
     expect(
       state.activities.find(
         (item: { kind: string; before: string | null }) =>
@@ -797,7 +856,7 @@ describeDb("共有リストの削除", () => {
         title: "消えるTODO",
         status: "todo",
         priority: "medium",
-        assigneeId: userId,
+        assigneeIds: [userId],
         userId,
       }),
     });

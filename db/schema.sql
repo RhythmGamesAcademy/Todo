@@ -27,7 +27,9 @@ CREATE TABLE todos (
   priority    TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high')),
   due         TIMESTAMPTZ,
   deleted_at  TIMESTAMPTZ,
-  assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  -- 担当者は複数。空配列 = 未割り当て。単数時代の assignee_id は
+  -- db/migrations/003_multiple_assignees.sql で引き継ぐ。
+  assignee_ids UUID[] NOT NULL DEFAULT '{}',
   created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
   tags        TEXT[] NOT NULL DEFAULT '{}',
   approval_status TEXT CHECK (approval_status IN ('pending', 'approved', 'rejected')),

@@ -39,7 +39,7 @@ const validState = (): CloudState => ({
       deadline: "2026-10-20T18:00:00+09:00",
       priority: "high",
       status: "doing",
-      assigneeId: "user-1",
+      assigneeIds: ["user-1"],
       tags: [],
       approvalStatus: null,
       approvalReason: null,
@@ -274,7 +274,7 @@ describe("呼び出し元の userId", () => {
       deadline: null,
       priority: "medium",
       status: "todo",
-      assigneeId: null,
+      assigneeIds: [],
       tags: [],
     });
     expect(bodyOf(createMock)).toEqual({
@@ -283,7 +283,7 @@ describe("呼び出し元の userId", () => {
       deadline: null,
       priority: "medium",
       status: "todo",
-      assigneeId: null,
+      assigneeIds: [],
       tags: [],
       userId: "user-1",
     });

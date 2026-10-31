@@ -40,6 +40,18 @@ import type {
 } from "./model";
 import type { Activity, CloudUser, TodoPatch } from "./cloud/types";
 import { computeEntries, Timeline } from "./screens/Timeline";
+
+/**
+ * 担当者ID配列を表示名の配列にする。リストに居ないID(削除済みメンバーの
+ * 履歴など)は「不明なメンバー」と表示する。
+ */
+export function assigneeNames(assigneeIds: string[], users: CloudUser[]) {
+  return assigneeIds.map(
+    (id) =>
+      users.find((user) => user.id === id)?.name ??
+      messages.todo.assigneeUnknown,
+  );
+}
 export function Mark() {
   return (
     <img
@@ -135,12 +147,7 @@ export function TodoCard({
 }) {
   const overdue = isOverdue(todo, now);
   const latest = todo.notes.at(-1);
-  const assignee = todo.assigneeId
-    ? users.find((user) => user.id === todo.assigneeId)
-    : undefined;
-  const assigneeName = todo.assigneeId
-    ? (assignee?.name ?? messages.todo.assigneeUnknown)
-    : null;
+  const assignees = assigneeNames(todo.assigneeIds, users);
   return (
     <button
       className={
@@ -181,12 +188,12 @@ export function TodoCard({
               )}
             </span>
           )}
-          {assigneeName && (
-            <span className="assignee">
+          {assignees.map((assigneeName, index) => (
+            <span key={todo.assigneeIds[index]} className="assignee">
               <UserRound size={13} />
               {assigneeName}
             </span>
-          )}
+          ))}
           <span className={"priority priority-" + todo.priority}>
             <Flag size={13} />
             {messages.todo.priorityLabel(PRIORITY[todo.priority])}
@@ -301,13 +308,11 @@ export function TodoForm({
     todo?.priority ?? "medium",
   );
   const [status, setStatus] = useState<Status>(todo?.status ?? "todo");
-  const [assigneeId, setAssigneeId] = useState<string | null>(
-    todo?.assigneeId ?? null,
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(
+    todo?.assigneeIds ?? [],
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const assigneeMissing =
-    assigneeId !== null && !users.some((user) => user.id === assigneeId);
   const dirty =
     title !== (todo?.title ?? "") ||
     description !== (todo?.description ?? "") ||
@@ -316,7 +321,7 @@ export function TodoForm({
     deadline !== (todo?.deadline ? toDateInput(todo.deadline) : "") ||
     priority !== (todo?.priority ?? "medium") ||
     status !== (todo?.status ?? "todo") ||
-    assigneeId !== (todo?.assigneeId ?? null);
+    assigneeIds.join("\n") !== (todo?.assigneeIds ?? []).join("\n");
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
@@ -393,7 +398,7 @@ export function TodoForm({
         deadline: deadlineIso,
         priority,
         status,
-        assigneeId,
+        assigneeIds,
         tags: savedTags,
       });
     } finally {
@@ -497,25 +502,51 @@ export function TodoForm({
           ))}
         </div>
       </fieldset>
-      <label className="field-label" htmlFor="todo-assignee">
-        {messages.todo.assignee}
-      </label>
-      <select
-        id="todo-assignee"
-        className="field"
-        value={assigneeId ?? ""}
-        onChange={(e) => setAssigneeId(e.target.value || null)}
-      >
-        <option value="">{messages.filters.assignment.none}</option>
-        {assigneeMissing && assigneeId && (
-          <option value={assigneeId}>{messages.todo.assigneeUnknown}</option>
-        )}
-        {users.map((user) => (
-          <option key={user.id} value={user.id}>
-            {user.name}
-          </option>
-        ))}
-      </select>
+      <fieldset className="assignee-field">
+        <legend className="field-label">{messages.todo.assignee}</legend>
+        <div className="assignee-options">
+          {/* 削除済みメンバーの担当。チェックを外すまで保持して表示する
+              (チェックボックスが無いと意図せず未割り当てに変わる)。 */}
+          {assigneeIds
+            .filter((id) => !users.some((user) => user.id === id))
+            .map((id) => (
+              <label key={id} className="assignee-option selected">
+                <input
+                  type="checkbox"
+                  checked={true}
+                  onChange={() =>
+                    setAssigneeIds((current) =>
+                      current.filter((candidate) => candidate !== id),
+                    )
+                  }
+                />
+                {messages.todo.assigneeUnknown}
+              </label>
+            ))}
+          {users.map((user) => (
+            <label
+              key={user.id}
+              className={
+                "assignee-option" +
+                (assigneeIds.includes(user.id) ? " selected" : "")
+              }
+            >
+              <input
+                type="checkbox"
+                checked={assigneeIds.includes(user.id)}
+                onChange={(e) => {
+                  setAssigneeIds((current) =>
+                    e.target.checked
+                      ? [...current, user.id]
+                      : current.filter((candidate) => candidate !== user.id),
+                  );
+                }}
+              />
+              {user.name}
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <fieldset className="tags-field">
         <legend className="field-label">
           {messages.tags.label}
@@ -1022,12 +1053,7 @@ export function TodoDetail({
     () => computeEntries(activities, todo.notes, users).length,
     [activities, todo.notes, users],
   );
-  const assignee = todo.assigneeId
-    ? users.find((user) => user.id === todo.assigneeId)
-    : undefined;
-  const assigneeName = todo.assigneeId
-    ? (assignee?.name ?? messages.todo.assigneeUnknown)
-    : null;
+  const assignees = assigneeNames(todo.assigneeIds, users);
   useEffect(() => {
     onDirty(
       !!text.trim() ||
@@ -1123,12 +1149,12 @@ export function TodoDetail({
             <Flag size={15} />
             {messages.todo.priorityLabel(PRIORITY[todo.priority])}
           </span>
-          {assigneeName && (
-            <span className="assignee">
+          {assignees.map((assigneeName, index) => (
+            <span key={todo.assigneeIds[index]} className="assignee">
               <UserRound size={15} />
               {assigneeName}
             </span>
-          )}
+          ))}
           <span
             className={"detail-due " + (isOverdue(todo, now) ? "overdue" : "")}
           >

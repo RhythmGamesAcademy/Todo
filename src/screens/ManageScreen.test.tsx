@@ -33,7 +33,7 @@ const todo = (extra: Partial<Todo>): Todo => ({
   deadline: null,
   priority: "medium",
   status: "todo",
-  assigneeId: null,
+  assigneeIds: [],
   tags: [],
   approvalStatus: null,
   approvalReason: null,
@@ -48,10 +48,10 @@ const state: CloudState = {
   list: { id: "list", title: "共有リスト", revision: 4 },
   users: [me, other],
   todos: [
-    todo({ id: "t1", assigneeId: "other" }),
-    todo({ id: "t2", assigneeId: "other" }),
-    todo({ id: "t3", assigneeId: "me" }),
-    todo({ id: "t4", assigneeId: null }),
+    todo({ id: "t1", assigneeIds: ["other"] }),
+    todo({ id: "t2", assigneeIds: ["other"] }),
+    todo({ id: "t3", assigneeIds: ["me"] }),
+    todo({ id: "t4", assigneeIds: [] }),
   ],
   activities: [],
 };

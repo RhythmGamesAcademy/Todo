@@ -19,7 +19,7 @@ const validState = (): CloudState => ({
       deadline: "2026-10-20T18:00:00+09:00",
       priority: "high",
       status: "doing",
-      assigneeId: "user-1",
+      assigneeIds: ["user-1"],
       tags: [],
       approvalStatus: null,
       approvalReason: null,
@@ -49,7 +49,7 @@ const validState = (): CloudState => ({
       deadline: null,
       priority: "low",
       status: "todo",
-      assigneeId: null,
+      assigneeIds: [],
       tags: ["申請"],
       approvalStatus: "pending",
       approvalReason: null,
@@ -179,9 +179,25 @@ describe("parseCloudState", () => {
     reject(broken((s) => (s.list = [])));
   });
 
-  it("TODO に assigneeId がなければ拒否する", () => {
-    reject(broken((s) => delete s.todos[0].assigneeId));
-    reject(broken((s) => (s.todos[0].assigneeId = 1)));
+  it("TODO に assigneeIds がなければ拒否する", () => {
+    reject(broken((s) => delete s.todos[0].assigneeIds));
+    reject(broken((s) => (s.todos[0].assigneeIds = 1)));
+    reject(broken((s) => (s.todos[0].assigneeIds = [""])));
+  });
+
+  it("旧単数 assigneeId だけのデータは配列に読み替える", () => {
+    const legacy = broken((s) => {
+      delete s.todos[0].assigneeIds;
+      s.todos[0].assigneeId = "user-1";
+    });
+    const parsed = parseCloudState(legacy);
+    expect(parsed.todos[0].assigneeIds).toEqual(["user-1"]);
+    // 旧データの未割り当て(null)も空配列に読み替える。
+    const cleared = broken((s) => {
+      delete s.todos[0].assigneeIds;
+      s.todos[0].assigneeId = null;
+    });
+    expect(parseCloudState(cleared).todos[0].assigneeIds).toEqual([]);
   });
 
   it("status が todo|doing|done 以外なら拒否する", () => {
