@@ -20,6 +20,9 @@ const validState = (): CloudState => ({
       priority: "high",
       status: "doing",
       assigneeId: "user-1",
+      tags: [],
+      approvalStatus: null,
+      approvalReason: null,
       createdAt: now,
       updatedAt: now,
       subtasks: [],
@@ -47,6 +50,9 @@ const validState = (): CloudState => ({
       priority: "low",
       status: "todo",
       assigneeId: null,
+      tags: ["申請"],
+      approvalStatus: "pending",
+      approvalReason: null,
       createdAt: now,
       updatedAt: now,
       subtasks: [],
@@ -77,8 +83,22 @@ const validState = (): CloudState => ({
   ],
 });
 
-const broken = (change: (state: any) => void): unknown => {
-  const state = validState();
+const broken = (
+  change: (state: any) => void,
+  withNotifications = false,
+): unknown => {
+  const state = validState() as any;
+  if (withNotifications)
+    state.notifications = [
+      {
+        id: "notification-1",
+        todoId: "todo-2",
+        userId: "user-1",
+        kind: "mention",
+        body: "設計を確認して",
+        createdAt: now,
+      },
+    ];
   change(state);
   return state;
 };
@@ -273,5 +293,79 @@ describe("parseCloudState", () => {
     const state = validState();
     state.todos.push({ ...state.todos[1], id: "todo-3", title: "" });
     reject(state);
+  });
+
+  it("タグ・承認状態・通知は新APIの値をそのまま受け入れる", () => {
+    const state = validState() as unknown as Record<string, unknown>;
+    state.notifications = [
+      {
+        id: "notification-1",
+        todoId: "todo-2",
+        userId: "user-1",
+        kind: "mention",
+        body: "設計を確認して",
+        createdAt: now,
+      },
+    ];
+    const parsed = parseCloudState(state);
+    expect(parsed.todos[1]).toMatchObject({
+      tags: ["申請"],
+      approvalStatus: "pending",
+      approvalReason: null,
+    });
+    expect(parsed.notifications).toEqual([
+      expect.objectContaining({ kind: "mention", todoId: "todo-2" }),
+    ]);
+  });
+
+  it("旧API由来の欠損フィールドは規定値へ補完する", () => {
+    const state = validState();
+    delete (state.todos[0] as { tags?: string[] }).tags;
+    delete (state.todos[0] as { approvalStatus?: unknown }).approvalStatus;
+    delete (state.todos[0] as { approvalReason?: unknown }).approvalReason;
+    const parsed = parseCloudState(state);
+    expect(parsed.todos[0]).toMatchObject({
+      tags: [],
+      approvalStatus: null,
+      approvalReason: null,
+    });
+  });
+
+  it("タグと承認状態の異常値を拒否する", () => {
+    reject(broken((s) => (s.todos[0].tags = "申請")));
+    reject(broken((s) => (s.todos[0].tags = [""])));
+    reject(broken((s) => (s.todos[0].tags = ["あ".repeat(21)])));
+    reject(broken((s) => (s.todos[0].approvalStatus = "unknown")));
+    reject(broken((s) => (s.todos[0].approvalReason = 1)));
+  });
+
+  it("通知の型を検証する", () => {
+    const state = validState() as unknown as Record<string, unknown>;
+    state.notifications = [
+      {
+        id: "notification-1",
+        todoId: null,
+        userId: "user-1",
+        kind: "todo.assigned",
+        body: null,
+        createdAt: now,
+      },
+    ];
+    expect(parseCloudState(state).notifications).toHaveLength(1);
+    reject(broken((s) => (s.notifications[0].kind = "unknown"), true));
+    reject(broken((s) => (s.notifications[0].body = 1), true));
+    reject(broken((s) => (s.notifications[0].id = " "), true));
+  });
+
+  it("メンバーの未読時刻は省略・null・ISO時刻を許す", () => {
+    const state = validState();
+    (
+      state.users[0] as { notificationReadAt?: string | null }
+    ).notificationReadAt = now;
+    (
+      state.users[1] as { notificationReadAt?: string | null }
+    ).notificationReadAt = null;
+    expect(() => parseCloudState(state)).not.toThrow();
+    reject(broken((s) => (s.users[0].notificationReadAt = "not-a-date")));
   });
 });

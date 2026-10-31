@@ -1,11 +1,16 @@
 import { messages } from "../messages";
 import { record, validDate } from "../model";
-import type { Priority, Status, SubtaskStatus } from "../model";
-import type { ActivityKind, CloudState } from "./types";
+import type { ApprovalStatus, Priority, Status, SubtaskStatus } from "../model";
+import type { ActivityKind, CloudState, NotificationKind } from "./types";
 
 const STATUSES: readonly Status[] = ["todo", "doing", "done"];
 const SUBTASK_STATUSES: readonly SubtaskStatus[] = ["todo", "done"];
 const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
+const APPROVAL_STATUSES: readonly ApprovalStatus[] = [
+  "pending",
+  "approved",
+  "rejected",
+];
 const ACTIVITY_KINDS: readonly ActivityKind[] = [
   "todo.created",
   "todo.updated",
@@ -15,7 +20,17 @@ const ACTIVITY_KINDS: readonly ActivityKind[] = [
   "user.renamed",
   "user.removed",
   "list.renamed",
+  "approval.approved",
+  "approval.rejected",
 ];
+const NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  "mention",
+  "todo.assigned",
+  "approval.approved",
+  "approval.rejected",
+];
+const MAX_TAGS = 5;
+const MAX_TAG_LENGTH = 20;
 
 const fail = (): never => {
   throw new Error(messages.errors.invalidState);
@@ -27,6 +42,8 @@ const validText = (x: unknown, max: number): x is string =>
   typeof x === "string" && !!x.trim() && x.length <= max;
 const nullableString = (x: unknown): x is string | null =>
   x === null || typeof x === "string";
+const optionalString = (x: unknown): x is string | null | undefined =>
+  x === undefined || nullableString(x);
 const ISO_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 const daysInMonth = (year: number, month: number) =>
@@ -75,11 +92,27 @@ function validateUser(value: unknown, ids: Set<string>): void {
     !validId(value.id) ||
     ids.has(value.id) ||
     !validText(value.name, 120) ||
-    !isIsoTimestamp(value.createdAt)
+    !isIsoTimestamp(value.createdAt) ||
+    !(
+      value.notificationReadAt === undefined ||
+      value.notificationReadAt === null ||
+      isIsoTimestamp(value.notificationReadAt)
+    )
   )
     return fail();
   ids.add(value.id);
 }
+
+// タグは旧API/旧バックアップでは存在しないため optional で受け、
+// あるときはサーバーと同じ規則(1〜20文字・最大5個)を検証する。
+const validateTags = (x: unknown): x is string[] | undefined => {
+  if (x === undefined) return true;
+  if (!Array.isArray(x) || x.length > MAX_TAGS) return false;
+  return x.every(
+    (tag) =>
+      typeof tag === "string" && !!tag.trim() && tag.length <= MAX_TAG_LENGTH,
+  );
+};
 
 function validateNote(value: unknown, ids: Set<string>): void {
   if (
@@ -141,6 +174,13 @@ function validateTodo(value: unknown, ids: Set<string>): void {
     !oneOf(PRIORITIES, value.priority) ||
     !oneOf(STATUSES, value.status) ||
     !(value.assigneeId === null || validId(value.assigneeId)) ||
+    !validateTags(value.tags) ||
+    !(
+      value.approvalStatus === undefined ||
+      value.approvalStatus === null ||
+      oneOf(APPROVAL_STATUSES, value.approvalStatus)
+    ) ||
+    !optionalString(value.approvalReason) ||
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt) ||
     !Array.isArray(value.notes) ||
@@ -172,6 +212,21 @@ function validateActivity(value: unknown, ids: Set<string>): void {
   ids.add(value.id);
 }
 
+function validateNotification(value: unknown, ids: Set<string>): void {
+  if (
+    !record(value) ||
+    !validId(value.id) ||
+    ids.has(value.id) ||
+    !nullableString(value.todoId) ||
+    !nullableString(value.userId) ||
+    !oneOf(NOTIFICATION_KINDS, value.kind) ||
+    !nullableString(value.body) ||
+    !isIsoTimestamp(value.createdAt)
+  )
+    return fail();
+  ids.add(value.id);
+}
+
 export function parseCloudState(input: unknown): CloudState {
   if (!record(input)) return fail();
   validateList(input.list);
@@ -179,7 +234,8 @@ export function parseCloudState(input: unknown): CloudState {
     !Array.isArray(input.users) ||
     !Array.isArray(input.todos) ||
     input.todos.length > 10000 ||
-    !Array.isArray(input.activities)
+    !Array.isArray(input.activities) ||
+    !(input.notifications === undefined || Array.isArray(input.notifications))
   )
     return fail();
   const userIds = new Set<string>();
@@ -189,10 +245,17 @@ export function parseCloudState(input: unknown): CloudState {
   const activityIds = new Set<string>();
   for (const activity of input.activities)
     validateActivity(activity, activityIds);
+  const notificationIds = new Set<string>();
+  for (const notification of input.notifications ?? [])
+    validateNotification(notification, notificationIds);
   return {
     ...input,
     todos: input.todos.map((todo) => ({
       ...todo,
+      // 旧API/旧モックに無い新フィールドは規定値へ補完する。
+      tags: todo.tags ?? [],
+      approvalStatus: todo.approvalStatus ?? null,
+      approvalReason: todo.approvalReason ?? null,
       subtasks: todo.subtasks ?? [],
     })),
   } as unknown as CloudState;

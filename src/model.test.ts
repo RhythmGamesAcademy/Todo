@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { calendarUrl, isOverdue, selectTodos, toDateInput } from "./model";
+import {
+  calendarUrl,
+  cleanTags,
+  isOverdue,
+  selectTodos,
+  toDateInput,
+} from "./model";
+import { messages } from "./messages";
 import { nextDeadlineId } from "./model";
 import type { Todo } from "./model";
 const now = new Date("2026-10-18T12:00:00+09:00");
@@ -15,6 +22,9 @@ const make = (
   priority,
   status: "todo",
   assigneeId: null,
+  tags: [],
+  approvalStatus: null,
+  approvalReason: null,
   subtasks: [],
   notes: [],
   createdAt: now.toISOString(),
@@ -219,5 +229,35 @@ describe("直近の期限のアクセント", () => {
     const b = make("b", now.toISOString());
     expect(nextDeadlineId([a, b], now)).toBe("a");
     expect(nextDeadlineId([b, a], now)).toBe("a");
+  });
+});
+
+describe("cleanTags", () => {
+  it("前後の空白を除き、空要素と重複を落として順序を保つ", () => {
+    expect(cleanTags(undefined)).toEqual({ tags: [], error: null });
+    expect(cleanTags("申請")).toEqual({ tags: [], error: null });
+    expect(cleanTags([" 申請 ", "", "申請", "会議"])).toEqual({
+      tags: ["申請", "会議"],
+      error: null,
+    });
+  });
+
+  it("上限超過と文字数超過はエラーを返す", () => {
+    expect(cleanTags(["1", "2", "3", "4", "5", "6"])).toEqual({
+      tags: [],
+      error: messages.tags.errorCount,
+    });
+    expect(cleanTags(["あ".repeat(21)])).toEqual({
+      tags: [],
+      error: messages.tags.errorLength,
+    });
+  });
+
+  it("上限ちょうどと文字数ちょうどは受け入れる", () => {
+    expect(cleanTags(["1", "2", "3", "4", "5"]).tags).toHaveLength(5);
+    expect(cleanTags(["あ".repeat(20)])).toEqual({
+      tags: ["あ".repeat(20)],
+      error: null,
+    });
   });
 });

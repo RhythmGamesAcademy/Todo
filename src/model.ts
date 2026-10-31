@@ -5,6 +5,12 @@ export type Priority = "high" | "medium" | "low";
 export type Filter = "all" | "overdue" | "active" | "today" | "doing" | "done";
 export type Sort = "deadline" | "priority";
 export type AssigneeFilter = "any" | "none" | string;
+/** 承認フローの状態。「申請」タグが付いたTODOだけが値を持つ。 */
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+/** 承認/否認フローの対象にする特別タグ。api/src/domain.ts と揃える。 */
+export const REQUEST_TAG = "申請";
+export const MAX_TAGS = 5;
+export const MAX_TAG_LENGTH = 20;
 export interface Note {
   id: string;
   text: string;
@@ -35,6 +41,9 @@ export interface Todo {
   priority: Priority;
   status: Status;
   assigneeId: string | null;
+  tags: string[];
+  approvalStatus: ApprovalStatus | null;
+  approvalReason: string | null;
   createdAt: string;
   updatedAt: string;
   notes: Note[];
@@ -47,6 +56,7 @@ export interface TodoDraft {
   priority: Priority;
   status: Status;
   assigneeId: string | null;
+  tags: string[];
 }
 export interface SubtaskDraft {
   title: string;
@@ -181,3 +191,28 @@ export const record = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
 export const validDate = (x: unknown): x is string =>
   typeof x === "string" && Number.isFinite(Date.parse(x));
+
+/**
+ * 入力 UI 用のタグ正規化。api/src/domain.ts の parseTags と同じ規則
+ * (前後空白の除去・重複排除・最大個数/長さ)だが、API の 400 ではなく
+ * エラーメッセージを返す。
+ */
+export function cleanTags(value: unknown): {
+  tags: string[];
+  error: string | null;
+} {
+  if (!Array.isArray(value)) return { tags: [], error: null };
+  if (value.length > MAX_TAGS)
+    return { tags: [], error: messages.tags.errorCount };
+  const tags: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string")
+      return { tags: [], error: messages.tags.errorLength };
+    const tag = item.trim();
+    if (!tag) continue;
+    if (tag.length > MAX_TAG_LENGTH)
+      return { tags: [], error: messages.tags.errorLength };
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  return { tags, error: null };
+}
