@@ -2453,3 +2453,215 @@ input[type="checkbox"] {
     flex-direction: column;
   }
 }
+
+/* 通知ベルとバッジ(アイコン右下に件数を重ねる) */
+.bell-button {
+  position: relative;
+}
+.bell-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -1px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #d8404e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* 通知パネル */
+.notification-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f7fafd;
+}
+.notification-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.notification-mention {
+  background: #fdf3e3;
+  color: #b97a17;
+}
+.notification-assigned {
+  background: #edf4ff;
+  color: #1767d7;
+}
+.notification-approved {
+  background: #e9f7ef;
+  color: #237a4b;
+}
+.notification-rejected {
+  background: #fbeaec;
+  color: #b63d3d;
+}
+.notification-content {
+  min-width: 0;
+}
+.notification-text {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.notification-preview {
+  margin: 2px 0 0;
+  color: #6b7b92;
+  font-size: 12px;
+}
+.notification-time {
+  display: block;
+  margin-top: 3px;
+  color: #96a4b8;
+  font-size: 11px;
+}
+.notification-empty {
+  padding: 26px 0;
+  text-align: center;
+  color: #96a4b8;
+  font-size: 13px;
+}
+
+/* タグチップ */
+.tags-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.tag-chips {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef3fa;
+  color: #415a7b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tag-chip.tag-request {
+  background: #fdf3e3;
+  color: #9a6a10;
+  font-weight: 600;
+}
+.tag-remove {
+  min-width: 18px;
+  min-height: 18px;
+  border-radius: 50%;
+  margin-right: -5px;
+}
+.tag-remove:hover {
+  background: rgb(23 103 215 / 12%);
+}
+.card-tag-row,
+.detail-tag-row {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.card-tag-row {
+  margin-bottom: 2px;
+}
+.detail-tag-row {
+  margin: 10px 0 0;
+}
+
+/* 申請(承認/否認) */
+.approval {
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid #ead9b8;
+  border-radius: 14px;
+  background: #fdfaf3;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.approval-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.approval-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.approval-pending {
+  background: #fdf3e3;
+  color: #9a6a10;
+}
+.approval-approved {
+  background: #e9f7ef;
+  color: #237a4b;
+}
+.approval-rejected {
+  background: #fbeaec;
+  color: #b63d3d;
+}
+.approval-none {
+  background: #f0f3f7;
+  color: #68778b;
+}
+.approval-actions {
+  display: flex;
+  gap: 8px;
+}
+.approval-reason {
+  margin: 0;
+  font-size: 13px;
+  color: #4a3b28;
+}
+.approval-reason strong {
+  display: block;
+  color: #9a6a10;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.approval-reject-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

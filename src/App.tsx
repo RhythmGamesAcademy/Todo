@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowDownUp,
+  Bell,
   Check,
   ChevronRight,
   LayoutGrid,
@@ -43,6 +44,7 @@ import type { AskOptions } from "./ui";
 import { LoginScreen } from "./screens/LoginScreen";
 import { ManageScreen } from "./screens/ManageScreen";
 import { TodoNavigation } from "./components/TodoNavigation";
+import { NotificationPanel } from "./notifications/NotificationPanel";
 import { CompletionCelebration } from "./completion/CompletionCelebration";
 import { useCompletionQueue } from "./completion/useCompletionQueue";
 import { CompletionNotice } from "./completion/CompletionNotice";
@@ -51,6 +53,7 @@ type View =
   | { type: "detail" | "edit"; id: string; setDeadline?: boolean }
   | { type: "data" }
   | { type: "manage" }
+  | { type: "notifications" }
   | null;
 type Confirm = AskOptions & { resolve: (answer: boolean) => void };
 type Undo = { id: string };
@@ -113,6 +116,23 @@ export default function App() {
         : todos,
     [todos, pendingCompletion],
   );
+  const meUser = users.find((user) => user.id === meId);
+  const readAt = meUser?.notificationReadAt ?? null;
+  const notifications = state ? (state.notifications ?? []) : [];
+  // 未読バッジは、パネルを最後に開いた時刻よりも後の通知だけを数える。
+  const unread = useMemo(
+    () =>
+      notifications.filter(
+        (notification) => !readAt || notification.createdAt > readAt,
+      ).length,
+    [notifications, readAt],
+  );
+  const tagSuggestions = useMemo(() => {
+    const tags: string[] = [];
+    for (const todo of todos)
+      for (const tag of todo.tags) if (!tags.includes(tag)) tags.push(tag);
+    return tags;
+  }, [todos]);
   const prepareCompletion = useCallback(() => {
     setFilter("active");
     setSearch("");
@@ -210,6 +230,13 @@ export default function App() {
     setDirty(false);
     setView({ type: "create" });
   }
+  function openNotifications() {
+    setToast(null);
+    setDirty(false);
+    setView({ type: "notifications" });
+    // パネルを開いた時点で全既読にする。失敗してもバッジは次の更新で整う。
+    void act(() => board.markNotificationsRead());
+  }
   async function updateTodo(id: string, patch: TodoPatch, message: string) {
     const previous = todos.find((t) => t.id === id);
     const completing =
@@ -296,6 +323,8 @@ export default function App() {
     if (draft.status !== selected.status) patch.status = draft.status;
     if (draft.assigneeId !== selected.assigneeId)
       patch.assigneeId = draft.assigneeId;
+    if (draft.tags.join("\n") !== selected.tags.join("\n"))
+      patch.tags = draft.tags;
     const fields = Object.keys(patch);
     if (fields.length === 0) {
       setActionError(null);
@@ -313,6 +342,16 @@ export default function App() {
     }
     setDirty(false);
     setView({ type: "detail", id: selected.id });
+    return true;
+  }
+  async function approveRequest(id: string) {
+    if (!(await act(() => board.approveTodo(id)))) return false;
+    setToast({ message: messages.approval.submitted });
+    return true;
+  }
+  async function rejectRequest(id: string, reason: string) {
+    if (!(await act(() => board.rejectTodo(id, reason)))) return false;
+    setToast({ message: messages.approval.rejectedSubmitted });
     return true;
   }
   async function deleteTodo(todo: Todo) {
@@ -404,6 +443,18 @@ export default function App() {
               </span>
             </time>
           </div>
+          <button
+            className="icon-button bell-button"
+            onClick={openNotifications}
+            aria-label={messages.notifications.openLabel(unread)}
+          >
+            <Bell size={21} />
+            {unread > 0 && (
+              <span className="bell-badge" aria-hidden="true">
+                {unread > 99 ? "99+" : unread}
+              </span>
+            )}
+          </button>
           <button
             className="mobile-data icon-button"
             onClick={() => setView({ type: "manage" })}
@@ -598,6 +649,19 @@ export default function App() {
           </section>
         </main>
       </div>
+      {view?.type === "notifications" && (
+        <Modal
+          title={messages.notifications.title}
+          onClose={closeView}
+          notice={toast?.message}
+        >
+          <NotificationPanel
+            notifications={notifications}
+            users={users}
+            meId={meId}
+          />
+        </Modal>
+      )}
       {view?.type === "create" && (
         <Modal
           title={messages.todo.create}
@@ -611,6 +675,7 @@ export default function App() {
           )}
           <TodoForm
             users={users}
+            tagSuggestions={tagSuggestions}
             onSave={saveDraft}
             onCancel={closeView}
             onDirty={setDirty}
@@ -633,6 +698,7 @@ export default function App() {
             key={selected.id}
             todo={selected}
             users={users}
+            tagSuggestions={tagSuggestions}
             setDeadline={view.setDeadline}
             onSave={saveDraft}
             onCancel={async () => {
@@ -681,6 +747,8 @@ export default function App() {
             onSubtaskMemo={(subtaskId, body) =>
               addSubtaskMemo(selected.id, subtaskId, body)
             }
+            onApprove={() => approveRequest(selected.id)}
+            onReject={(reason) => rejectRequest(selected.id, reason)}
             onDirty={setDirty}
             ask={ask}
             onEdit={async (setDeadline = false) => {

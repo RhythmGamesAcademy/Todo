@@ -9,6 +9,8 @@ const statusLabels = { todo: "未着手", doing: "進行中", done: "完了" };
 const priorityLabels = { high: "高", medium: "中", low: "低" };
 const noDeadlineLabel = "期限なし";
 const assigneeNoneLabel = "担当者なし";
+/** 承認フロー対象の特別タグ。src/model.ts の REQUEST_TAG と同じ文字列。 */
+const REQUEST_TAG_LABEL = "申請";
 const formatDeadline = (date: Date, withYear: boolean) =>
   (withYear ? date.getFullYear() + "年" : "") +
   (date.getMonth() + 1) +
@@ -25,6 +27,8 @@ const timelineFieldLabels: Record<string, string> = {
   priority: "優先度",
   status: "状態",
   assignee: "担当者",
+  tags: "タグ",
+  reason: "否認理由",
 };
 function timelineDate(value: string) {
   const date = new Date(value);
@@ -60,6 +64,11 @@ function timelineLine(
   if (kind === "todo.created") return actor + "がTODOを作成しました";
   if (kind === "todo.deleted") return actor + "がTODOを削除しました";
   if (kind === "todo.restored") return actor + "がTODOを元に戻しました";
+  if (kind === "approval.approved") return actor + "が申請を承認しました";
+  if (kind === "approval.rejected")
+    return (
+      actor + "が申請を否認しました" + (after ? "（理由: " + after + "）" : "")
+    );
   if (kind !== "todo.updated" || !field) return "";
   const label = timelineFieldLabels[field];
   if (!label) return "";
@@ -135,6 +144,48 @@ export const messages = {
     label: "一覧の表示形式",
     cards: "カード",
     compact: "リスト",
+  },
+  tags: {
+    label: "タグ",
+    input: "タグを入力してEnterで追加",
+    removeLabel: (tag: string) => tag + "を削除",
+    suggestionLabel: "タグの候補",
+    max: (count: number) => count + " / 5",
+    errorCount: "タグは5個までです。",
+    errorLength: "タグは20文字以内で入力してください。",
+    requestTag: REQUEST_TAG_LABEL,
+  },
+  approval: {
+    label: "申請",
+    pending: "承認待ち",
+    approved: "承認済み",
+    rejected: "否認済み",
+    approve: "承認する",
+    reject: "否認する",
+    approveConfirmTitle: "この申請を承認しますか？",
+    approveConfirmDescription: (title: string) =>
+      "「" + title + "」を承認済みにします。",
+    reasonLabel: "否認理由",
+    reasonPlaceholder: "否認する理由を入力してください",
+    reasonRequired: "否認理由を入力してください。",
+    reasonHeading: "否認理由",
+    submitted: "申請を承認しました",
+    rejectedSubmitted: "申請を否認しました",
+    reasonCount: (current: number, max: number) => current + " / " + max,
+  },
+  notifications: {
+    title: "通知",
+    openLabel: (count: number) =>
+      "通知" + (count ? "（未読 " + count + "件）" : ""),
+    empty: "通知はまだありません",
+    mention: (name: string | null) => (name ?? "誰か") + "がメンションしました",
+    assigned: (name: string | null) =>
+      (name ?? "誰か") + "が新しいTODOを作りました",
+    approved: (name: string | null) =>
+      (name ?? "誰か") + "が申請を承認しました",
+    rejected: (name: string | null) =>
+      (name ?? "誰か") + "が申請を否認しました",
+    self: "自分",
   },
   completion: {
     announced: (title: string) => "「" + title + "」を完了に移動しました",

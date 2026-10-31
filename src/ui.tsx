@@ -22,7 +22,10 @@ import {
   dateText,
   isOverdue,
   isToday,
+  MAX_TAGS,
+  MAX_TAG_LENGTH,
   PRIORITY,
+  REQUEST_TAG,
   STATUS,
   toDateInput,
 } from "./model";
@@ -163,6 +166,11 @@ export function TodoCard({
             {STATUS[todo.status]}
           </span>
         )}
+        {!compact && todo.tags.includes(REQUEST_TAG) && todo.approvalStatus && (
+          <span className={"approval-badge approval-" + todo.approvalStatus}>
+            {messages.approval[todo.approvalStatus]}
+          </span>
+        )}
         <span className="card-tags">
           {compact && todo.subtasks.length > 0 && (
             <span className="subtask-card-count">
@@ -185,6 +193,20 @@ export function TodoCard({
           </span>
         </span>
       </div>
+      {!compact && todo.tags.length > 0 && (
+        <ul className="card-tag-row" aria-label={messages.tags.label}>
+          {todo.tags.map((tag) => (
+            <li
+              key={tag}
+              className={
+                "tag-chip" + (tag === REQUEST_TAG ? " tag-request" : "")
+              }
+            >
+              {tag}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="card-summary">
         <h3>{todo.title}</h3>
         <p
@@ -248,6 +270,7 @@ export function TodoCard({
 export function TodoForm({
   todo,
   users,
+  tagSuggestions = [],
   setDeadline: focusDeadline = false,
   onSave,
   onCancel,
@@ -256,6 +279,7 @@ export function TodoForm({
 }: {
   todo?: Todo;
   users: CloudUser[];
+  tagSuggestions?: string[];
   setDeadline?: boolean;
   onSave: (draft: TodoDraft) => Promise<boolean>;
   onCancel: () => void;
@@ -264,6 +288,9 @@ export function TodoForm({
 }) {
   const [title, setTitle] = useState(todo?.title ?? "");
   const [description, setDescription] = useState(todo?.description ?? "");
+  const [tags, setTags] = useState<string[]>(todo?.tags ?? []);
+  const [tagDraft, setTagDraft] = useState("");
+  const [tagError, setTagError] = useState("");
   const [noDeadline, setNoDeadline] = useState(
     todo ? todo.deadline === null && !focusDeadline : false,
   );
@@ -284,6 +311,7 @@ export function TodoForm({
   const dirty =
     title !== (todo?.title ?? "") ||
     description !== (todo?.description ?? "") ||
+    tags.join("\n") !== (todo?.tags ?? []).join("\n") ||
     noDeadline !== (todo ? todo.deadline === null : false) ||
     deadline !== (todo?.deadline ? toDateInput(todo.deadline) : "") ||
     priority !== (todo?.priority ?? "medium") ||
@@ -292,11 +320,39 @@ export function TodoForm({
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
+  function commitTag(raw: string): boolean {
+    const tag = raw.trim();
+    if (!tag) return true;
+    if (tags.includes(tag)) {
+      setTagDraft("");
+      return true;
+    }
+    if (tag.length > MAX_TAG_LENGTH) {
+      setTagError(messages.tags.errorLength);
+      return false;
+    }
+    if (tags.length >= MAX_TAGS) {
+      setTagError(messages.tags.errorCount);
+      return false;
+    }
+    setTags((current) => [...current, tag]);
+    setTagDraft("");
+    return true;
+  }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!title.trim()) {
       setError(messages.todo.titleRequired);
       return;
+    }
+    // 入力途中のタグも保存対象に取り込む(チップ未確定のまま保存を許す)。
+    let savedTags = tags;
+    const pendingTag = tagDraft.trim();
+    if (pendingTag) {
+      if (!commitTag(pendingTag)) return; // commitTag 側でエラーを設定済み
+      savedTags = [...tags, ...[pendingTag]].filter(
+        (tag, index, all) => all.indexOf(tag) === index,
+      );
     }
     let deadlineIso: string | null = null;
     if (!noDeadline) {
@@ -338,6 +394,7 @@ export function TodoForm({
         priority,
         status,
         assigneeId,
+        tags: savedTags,
       });
     } finally {
       setSaving(false);
@@ -459,6 +516,70 @@ export function TodoForm({
           </option>
         ))}
       </select>
+      <fieldset className="tags-field">
+        <legend className="field-label">
+          {messages.tags.label}
+          <span className="optional">{messages.common.optional}</span>
+          <span className="char-count">{messages.tags.max(tags.length)}</span>
+        </legend>
+        {tags.length > 0 && (
+          <ul className="tag-chips" aria-label={messages.tags.label}>
+            {tags.map((tag) => (
+              <li
+                key={tag}
+                className={
+                  "tag-chip" + (tag === REQUEST_TAG ? " tag-request" : "")
+                }
+              >
+                {tag}
+                <button
+                  type="button"
+                  className="icon-button tag-remove"
+                  aria-label={messages.tags.removeLabel(tag)}
+                  onClick={() => {
+                    setTags((current) => current.filter((t) => t !== tag));
+                    setTagError("");
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <input
+          id="todo-tags"
+          list="todo-tag-suggestions"
+          value={tagDraft}
+          maxLength={MAX_TAG_LENGTH}
+          placeholder={messages.tags.input}
+          className="field"
+          onChange={(e) => {
+            setTagDraft(e.target.value);
+            setTagError("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              commitTag(e.currentTarget.value);
+            }
+          }}
+          onBlur={(e) => commitTag(e.currentTarget.value)}
+        />
+        <datalist id="todo-tag-suggestions">
+          {tagSuggestions
+            .filter((tag) => !tags.includes(tag))
+            .map((tag) => (
+              <option key={tag} value={tag} />
+            ))}
+        </datalist>
+        {tagError && (
+          <p className="form-error" role="alert">
+            <AlertCircle size={17} />
+            {tagError}
+          </p>
+        )}
+      </fieldset>
       {todo && (
         <>
           <label className="field-label" htmlFor="edit-status">
@@ -700,6 +821,154 @@ export interface AskOptions {
   cancel?: string;
   danger?: boolean;
 }
+/** 申請タグ付きTODOの承認/否認。否認は理由入力を必須にする。 */
+function ApprovalPanel({
+  todo,
+  ask,
+  onApprove,
+  onReject,
+}: {
+  todo: Todo;
+  ask: (options: AskOptions) => Promise<boolean>;
+  onApprove: () => Promise<boolean>;
+  onReject: (reason: string) => Promise<boolean>;
+}) {
+  const [deciding, setDeciding] = useState<"" | "reject">("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function approve() {
+    const confirmed = await ask({
+      title: messages.approval.approveConfirmTitle,
+      description: messages.approval.approveConfirmDescription(todo.title),
+      confirm: messages.approval.approve,
+    });
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      if (await onApprove()) {
+        setReason("");
+        setError("");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function reject(e: FormEvent) {
+    e.preventDefault();
+    const body = reason.trim();
+    if (!body) {
+      setError(messages.approval.reasonRequired);
+      return;
+    }
+    setSaving(true);
+    try {
+      if (await onReject(body)) {
+        setReason("");
+        setError("");
+        setDeciding("");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+  const status = todo.approvalStatus;
+  return (
+    <section className="approval" aria-label={messages.approval.label}>
+      <div className="approval-heading">
+        <span
+          className={
+            "approval-badge approval-" + (status === null ? "none" : status)
+          }
+        >
+          {status === null
+            ? messages.approval.pending
+            : messages.approval[status]}
+        </span>
+        {status !== "approved" && (
+          <div className="approval-actions">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={saving}
+              onClick={() => void approve()}
+            >
+              <Check size={16} />
+              {messages.approval.approve}
+            </button>
+            <button
+              type="button"
+              className="button button-danger"
+              disabled={saving}
+              onClick={() => setDeciding("reject")}
+            >
+              <X size={16} />
+              {messages.approval.reject}
+            </button>
+          </div>
+        )}
+      </div>
+      {status === "rejected" && todo.approvalReason && (
+        <p className="approval-reason">
+          <strong>{messages.approval.reasonHeading}</strong>
+          {todo.approvalReason}
+        </p>
+      )}
+      {deciding === "reject" && (
+        <form className="approval-reject-form" onSubmit={(e) => void reject(e)}>
+          <label className="field-label" htmlFor="approval-reason">
+            {messages.approval.reasonLabel}
+            <span className="required">{messages.common.required}</span>
+          </label>
+          <textarea
+            id="approval-reason"
+            className="field"
+            rows={2}
+            autoFocus
+            maxLength={2000}
+            value={reason}
+            onChange={(e) => {
+              setReason(e.target.value);
+              setError("");
+            }}
+            placeholder={messages.approval.reasonPlaceholder}
+          />
+          <div className="field-heading">
+            <span className="char-count">
+              {messages.common.characters(reason.length, 2000)}
+            </span>
+          </div>
+          {error && (
+            <p className="form-error" role="alert">
+              <AlertCircle size={17} />
+              {error}
+            </p>
+          )}
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => {
+                setDeciding("");
+                setReason("");
+                setError("");
+              }}
+            >
+              {messages.common.cancel}
+            </button>
+            <button
+              type="submit"
+              className="button button-danger"
+              disabled={saving || !reason.trim()}
+            >
+              {messages.approval.reject}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
 export function TodoDetail({
   todo,
   now,
@@ -712,6 +981,8 @@ export function TodoDetail({
   onSubtaskUpdate,
   onSubtaskDelete,
   onSubtaskMemo,
+  onApprove,
+  onReject,
   onEdit,
   onDelete,
   onDirty,
@@ -732,6 +1003,8 @@ export function TodoDetail({
   ) => Promise<boolean>;
   onSubtaskDelete: (subtask: Subtask) => void;
   onSubtaskMemo: (subtaskId: string, body: string) => Promise<boolean>;
+  onApprove: () => Promise<boolean>;
+  onReject: (reason: string) => Promise<boolean>;
   onEdit: (setDeadline?: boolean) => void;
   onDelete: () => void;
   onDirty: (dirty: boolean) => void;
@@ -870,6 +1143,28 @@ export function TodoDetail({
         </div>
         {todo.description && (
           <p className="detail-description">{todo.description}</p>
+        )}
+        {todo.tags.length > 0 && (
+          <ul className="detail-tag-row" aria-label={messages.tags.label}>
+            {todo.tags.map((tag) => (
+              <li
+                key={tag}
+                className={
+                  "tag-chip" + (tag === REQUEST_TAG ? " tag-request" : "")
+                }
+              >
+                {tag}
+              </li>
+            ))}
+          </ul>
+        )}
+        {todo.tags.includes(REQUEST_TAG) && (
+          <ApprovalPanel
+            todo={todo}
+            ask={ask}
+            onApprove={onApprove}
+            onReject={onReject}
+          />
         )}
         <div className="detail-controls">
           <div className="status-control">
