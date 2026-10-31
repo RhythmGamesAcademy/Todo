@@ -4,7 +4,10 @@ import {
   ApiException,
   assertText,
   computeActivities,
+  extractMentions,
   generateToken,
+  parseTags,
+  toPgTextArray,
 } from "./domain";
 
 describe("generateToken", () => {
@@ -63,6 +66,9 @@ describe("computeActivities", () => {
     priority: "medium",
     status: "todo",
     assigneeId: "user-1",
+    tags: [],
+    approvalStatus: null,
+    approvalReason: null,
     createdAt: "2026-10-18T00:00:00.000Z",
     updatedAt: "2026-10-18T00:00:00.000Z",
     subtasks: [],
@@ -126,5 +132,74 @@ describe("computeActivities", () => {
     expect(
       computeActivities(before, { assigneeId: null }, null, "あき"),
     ).toEqual([{ field: "assignee", before: "あき", after: null }]);
+  });
+
+  it("タグの差し替えは「、」結合の前後を履歴に出す", () => {
+    expect(
+      computeActivities({ ...before, tags: ["設計"] }, { tags: [] }, null),
+    ).toEqual([{ field: "tags", before: "設計", after: null }]);
+    expect(computeActivities(before, { tags: ["会議"] }, null)).toEqual([
+      { field: "tags", before: null, after: "会議" },
+    ]);
+  });
+});
+
+describe("parseTags", () => {
+  it("未指定は空配列、前後の空白を除き重複を除き順序を保つ", () => {
+    expect(parseTags(undefined)).toEqual([]);
+    expect(parseTags(null)).toEqual([]);
+    expect(parseTags([" 申請 ", "申請", "会議"])).toEqual(["申請", "会議"]);
+  });
+
+  it("配列以外・空要素・長過ぎるタグ・5個超を400で拒否する", () => {
+    expect(() => parseTags("申請")).toThrow(ApiException);
+    expect(() => parseTags([""])).toThrow(ApiException);
+    expect(() => parseTags(["あ".repeat(21)])).toThrow(ApiException);
+    expect(() => parseTags(["1", "2", "3", "4", "5", "6"])).toThrow(
+      ApiException,
+    );
+  });
+
+  it("5個ちょうどと20文字ちょうどは受け入れる", () => {
+    expect(parseTags(["あ".repeat(20)])).toEqual(["あ".repeat(20)]);
+    expect(parseTags(["1", "2", "3", "4", "5"])).toHaveLength(5);
+  });
+});
+
+describe("extractMentions", () => {
+  const users = [
+    { id: "u1", name: "あき" },
+    { id: "u2", name: "あきこ" },
+  ];
+
+  it("@名前 の完全一致だけでIDを返す", () => {
+    expect(extractMentions("@あき と @はる へ", users)).toEqual(["u1"]);
+    expect(extractMentions("@あきこさん", users)).toEqual(["u2"]);
+  });
+
+  it("長い名前を先に判定するため @あきこ は短い方に吸われない", () => {
+    expect(extractMentions("@あきこ", users)).toEqual(["u2"]);
+  });
+
+  it("対象外の名前や@なしは空配列", () => {
+    expect(extractMentions("@はる と あき", users)).toEqual([]);
+    expect(extractMentions("呼ぶぞあき", users)).toEqual([]);
+  });
+
+  it("重複メンションはIDを1つに畳む", () => {
+    expect(extractMentions("@あき @あき", users)).toEqual(["u1"]);
+  });
+});
+
+describe("toPgTextArray", () => {
+  it("text[] リテラルに変換する", () => {
+    expect(toPgTextArray([])).toBe("{}");
+    expect(toPgTextArray(["申請"])).toBe('{"申請"}');
+    expect(toPgTextArray(["a", "b"])).toBe('{"a","b"}');
+  });
+
+  it("引用符とバックスラッシュをエスケープする", () => {
+    expect(toPgTextArray(['"x"'])).toBe('{"\\"x\\""}');
+    expect(toPgTextArray(["y\\z"])).toBe('{"y\\\\z"}');
   });
 });

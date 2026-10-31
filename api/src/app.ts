@@ -12,16 +12,23 @@ import type {
 import type {
   Activity,
   ActivityKind,
+  ApprovalStatus,
   CloudState,
   CloudTodo,
   CloudUser,
+  Notification,
+  NotificationKind,
   TodoPatch,
 } from "../../src/cloud/types";
 import {
   ApiException,
   assertText,
   computeActivities,
+  extractMentions,
   generateToken,
+  parseTags,
+  REQUEST_TAG,
+  toPgTextArray,
 } from "./domain.js";
 import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
 
@@ -41,7 +48,24 @@ interface UserRow {
   id: string;
   name: string;
   created_at: unknown;
+  notification_read_at: unknown;
 }
+
+const toTextArray = (value: unknown): string[] => {
+  if (Array.isArray(value))
+    return value.filter((x): x is string => typeof x === "string");
+  if (typeof value !== "string") return [];
+  // ドライバが text[] をリテラル文字列( {"a","b"} )で返す場合の読み替え。
+  if (!value.startsWith("{") || !value.endsWith("}")) return [];
+  const inner = value.slice(1, -1);
+  if (!inner) return [];
+  return inner.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((item) =>
+    item
+      .trim()
+      .replace(/^"(.*)"$/, "$1")
+      .replace(/\\(.)/g, "$1"),
+  );
+};
 
 interface TodoRow {
   id: string;
@@ -51,12 +75,18 @@ interface TodoRow {
   priority: string;
   due: unknown;
   assignee_id: string | null;
+  tags: unknown;
+  approval_status: string | null;
+  approval_reason: string | null;
+  approval_by: string | null;
+  approval_at: unknown;
   created_at: unknown;
   updated_at: unknown;
 }
 
 interface TodoRecordRow extends TodoRow {
   deleted_at: unknown;
+  created_by: string | null;
 }
 
 interface UserRefRow {
@@ -101,6 +131,15 @@ interface ActivityRow {
   created_at: unknown;
 }
 
+interface NotificationRow {
+  id: string;
+  todo_id: string | null;
+  actor_id: string | null;
+  kind: string;
+  body: string | null;
+  created_at: unknown;
+}
+
 const rowsOf = <T>(result: { rows: unknown[] }): T[] => result.rows as T[];
 
 const toIso = (value: unknown): string =>
@@ -116,6 +155,11 @@ const toCloudTodo = (row: TodoRow): CloudTodo => ({
   priority: row.priority as Priority,
   status: row.status as Status,
   assigneeId: row.assignee_id,
+  tags: toTextArray(row.tags),
+  approvalStatus: row.approval_status
+    ? (row.approval_status as ApprovalStatus)
+    : null,
+  approvalReason: row.approval_reason,
   createdAt: toIso(row.created_at),
   updatedAt: toIso(row.updated_at),
   notes: [],
@@ -143,6 +187,7 @@ const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
 // 無制限に返すと履歴が溜まったリストで応答サイズが伸び続け、
 // 取得コスト(帯域・ Neon の行スキャン)がリクエストごとに増大する。
 const ACTIVITY_LIMIT = 500;
+const NOTIFICATION_LIMIT = 100;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 // UUID 以外の文字列を uuid 列と比較すると Postgres が 22P02 で落ちるため、
@@ -274,7 +319,8 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     const [todo] = rowsOf<TodoRecordRow>(
       await sql`
         SELECT id, title, description, status, priority, due, assignee_id,
-               created_at, updated_at, deleted_at
+               tags, approval_status, approval_reason, approval_by, approval_at,
+               created_by, created_at, updated_at, deleted_at
         FROM public.todos
         WHERE id = ${id} AND list_id = ${listId}
       `,
@@ -312,6 +358,32 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       INSERT INTO public.activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
       VALUES (${randomUUID()}, ${listId}, ${todoId}, ${userId}, ${kind}, ${field}, ${before}, ${after}, clock_timestamp())
     `;
+
+  const addNotification = (
+    listId: string,
+    todoId: string,
+    userId: string,
+    actorId: string | null,
+    kind: NotificationKind,
+    body: string | null,
+  ): SqlCall =>
+    // 通知は宛先ごとに1行。プレビューに使う本文は kind 側で決めて渡す。
+    sql`
+      INSERT INTO public.notifications (id, list_id, user_id, actor_id, todo_id, kind, body)
+      VALUES (${randomUUID()}, ${listId}, ${userId}, ${actorId}, ${todoId}, ${kind}, ${body})
+    `;
+
+  // 承認・否認の通知先は TODO の担当者と作成者。操作者自身には送らない。
+  const approvalRecipients = (
+    row: TodoRecordRow,
+    actorId: string | null,
+  ): string[] => {
+    const recipients = new Set<string>();
+    if (row.assignee_id) recipients.add(row.assignee_id);
+    if (row.created_by) recipients.add(row.created_by);
+    if (actorId) recipients.delete(actorId);
+    return [...recipients];
+  };
 
   app.post("/api/lists", async (c) => {
     const body = await readJson(c);
@@ -467,15 +539,31 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
             )
           ).id;
     const userId = await readOptionalUserId(body, list.id);
+    const tags = parseTags(body.tags);
+    // 「申請」タグ付きで作られたTODOは承認待ちとして始まる。
+    const approvalStatus = tags.includes(REQUEST_TAG) ? "pending" : null;
 
     const id = randomUUID();
-    await transact([
+    const statements = [
       sql`
-        INSERT INTO public.todos (id, list_id, title, description, status, priority, due, assignee_id)
-        VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${assigneeId})
+        INSERT INTO public.todos (id, list_id, title, description, status, priority, due, assignee_id, tags, approval_status)
+        VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${assigneeId}, ${toPgTextArray(tags)}::text[], ${approvalStatus})
       `,
       addActivity(list.id, id, userId, "todo.created", null, null, title),
-    ]);
+    ];
+    // 担当者を設定して作った場合だけ、担当者に作成通知を積む。
+    if (assigneeId !== null && userId !== null && assigneeId !== userId)
+      statements.push(
+        addNotification(
+          list.id,
+          id,
+          assigneeId,
+          userId,
+          "todo.assigned",
+          title,
+        ),
+      );
+    await transact(statements);
     return c.json({ id }, 201);
   });
 
@@ -497,6 +585,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       patch.status = parseEnum(body.status, STATUSES, "status");
     if (body.priority !== undefined)
       patch.priority = parseEnum(body.priority, PRIORITIES, "priority");
+    if (body.tags !== undefined) patch.tags = parseTags(body.tags);
 
     let assigneeAfter: UserRefRow | null | undefined;
     if (body.assigneeId !== undefined) {
@@ -539,13 +628,25 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       status: patch.status !== undefined,
       priority: patch.priority !== undefined,
       assignee: patch.assigneeId !== undefined,
+      tags: patch.tags !== undefined,
     };
     const nextDeadline =
       patch.deadline !== undefined ? patch.deadline : before.deadline;
     const nextAssigneeId =
       patch.assigneeId !== undefined ? patch.assigneeId : before.assigneeId;
+    const nextTags = has.tags ? patch.tags! : before.tags;
+    // 申請タグの脱着でのみ承認状態を切り替える。既に pending/approved/rejected
+    // のTODOに同タグを残す編集では現在値を保つ(否認済みのまま編集可)。
+    const approvalWillOpen =
+      has.tags &&
+      nextTags.includes(REQUEST_TAG) &&
+      !before.tags.includes(REQUEST_TAG);
+    const approvalWillClear =
+      has.tags &&
+      !nextTags.includes(REQUEST_TAG) &&
+      before.tags.includes(REQUEST_TAG);
 
-    await transact([
+    const statements = [
       sql`
         UPDATE public.todos SET
           title = CASE WHEN ${has.title} THEN ${patch.title ?? before.title} ELSE title END,
@@ -554,6 +655,11 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
           status = CASE WHEN ${has.status} THEN ${patch.status ?? before.status} ELSE status END,
           priority = CASE WHEN ${has.priority} THEN ${patch.priority ?? before.priority} ELSE priority END,
           assignee_id = CASE WHEN ${has.assignee} THEN ${nextAssigneeId}::uuid ELSE assignee_id END,
+          tags = CASE WHEN ${has.tags} THEN ${toPgTextArray(nextTags)}::text[] ELSE tags END,
+          approval_status = CASE WHEN ${approvalWillOpen} THEN 'pending' WHEN ${approvalWillClear} THEN NULL ELSE approval_status END,
+          approval_reason = CASE WHEN ${approvalWillOpen || approvalWillClear} THEN NULL ELSE approval_reason END,
+          approval_by = CASE WHEN ${approvalWillOpen || approvalWillClear} THEN NULL ELSE approval_by END,
+          approval_at = CASE WHEN ${approvalWillOpen || approvalWillClear} THEN NULL ELSE approval_at END,
           updated_at = now()
         WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NULL
       `,
@@ -566,6 +672,121 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
           change.field,
           change.before,
           change.after,
+        ),
+      ),
+    ];
+    // 担当が変わったら新しい担当者に通知する(自分で自分を選んだ場合は除く)。
+    if (
+      assigneeChanged &&
+      assigneeAfter &&
+      userId !== null &&
+      assigneeAfter.id !== userId
+    )
+      statements.push(
+        addNotification(
+          list.id,
+          row.id,
+          assigneeAfter.id,
+          userId,
+          "todo.assigned",
+          (patch.title ?? before.title) as string,
+        ),
+      );
+    await transact(statements);
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
+  // 承認・否認は申請タグ付きTODO専用。否認は理由の提出を強制する。
+  app.post("/api/lists/:token/todos/:id/approve", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findTodo(list.id, c.req.param("id"));
+    if (!row || row.deleted_at !== null) return notFound(c);
+    const body = await readOptionalJson(c);
+    const userId = await readOptionalUserId(body, list.id);
+
+    if (!toTextArray(row.tags).includes(REQUEST_TAG))
+      throw new ApiException(400, "todo is not tagged as a request");
+    // 既に承認済みへの再呼び出しは無変更で成功させる(冪等)。
+    if (row.approval_status === "approved")
+      return c.json({ revision: await readRevision(list.id) });
+
+    await transact([
+      sql`
+        UPDATE public.todos SET
+          approval_status = 'approved',
+          approval_reason = NULL,
+          approval_by = ${userId}::uuid,
+          approval_at = clock_timestamp(),
+          updated_at = now()
+        WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NULL
+      `,
+      addActivity(
+        list.id,
+        row.id,
+        userId,
+        "approval.approved",
+        "approval",
+        row.approval_status,
+        "approved",
+      ),
+      ...approvalRecipients(row, userId).map((recipient) =>
+        addNotification(
+          list.id,
+          row.id,
+          recipient,
+          userId,
+          "approval.approved",
+          row.title,
+        ),
+      ),
+    ]);
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
+  app.post("/api/lists/:token/todos/:id/reject", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findTodo(list.id, c.req.param("id"));
+    if (!row || row.deleted_at !== null) return notFound(c);
+    const body = await readJson(c);
+
+    // 理由のない却下は禁じる(400で二重防御)。理由は履歴・通知にも載る。
+    if (typeof body.reason !== "string" || !body.reason.trim())
+      throw new ApiException(400, "reason is required");
+    const reason = assertText(body.reason, 2000, "reason");
+    const userId = await readOptionalUserId(body, list.id);
+
+    if (!toTextArray(row.tags).includes(REQUEST_TAG))
+      throw new ApiException(400, "todo is not tagged as a request");
+
+    await transact([
+      sql`
+        UPDATE public.todos SET
+          approval_status = 'rejected',
+          approval_reason = ${reason},
+          approval_by = ${userId}::uuid,
+          approval_at = clock_timestamp(),
+          updated_at = now()
+        WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NULL
+      `,
+      addActivity(
+        list.id,
+        row.id,
+        userId,
+        "approval.rejected",
+        "reason",
+        row.approval_reason,
+        reason,
+      ),
+      ...approvalRecipients(row, userId).map((recipient) =>
+        addNotification(
+          list.id,
+          row.id,
+          recipient,
+          userId,
+          "approval.rejected",
+          reason,
         ),
       ),
     ]);
@@ -643,10 +864,22 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     const text = assertText(body.body, 2000, "body");
     const userId = await readOptionalUserId(body, list.id);
     const id = randomUUID();
-    await sql`
-      INSERT INTO public.memos (id, todo_id, user_id, body)
-      VALUES (${id}, ${row.id}, ${userId}, ${text})
-    `;
+    // 送信者以外のメンバーを候補に、本文中の @<名前>(完全一致)をメンションとする。
+    const mentionCandidates = rowsOf<{ id: string; name: string }>(
+      userId === null
+        ? await sql`SELECT id, name FROM public.users WHERE list_id = ${list.id}`
+        : await sql`SELECT id, name FROM public.users WHERE list_id = ${list.id} AND id <> ${userId}`,
+    );
+    const mentioned = extractMentions(text, mentionCandidates);
+    await transact([
+      sql`
+        INSERT INTO public.memos (id, todo_id, user_id, body)
+        VALUES (${id}, ${row.id}, ${userId}, ${text})
+      `,
+      ...mentioned.map((mentionedId) =>
+        addNotification(list.id, row.id, mentionedId, userId, "mention", text),
+      ),
+    ]);
     return c.json({ id }, 201);
   });
 
@@ -765,9 +998,36 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     },
   );
 
+  app.post("/api/lists/:token/notifications/read", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const body = await readJson(c);
+    if (body.userId === undefined || body.userId === null)
+      throw new ApiException(400, "userId is required");
+    const userId = parseUserId(body.userId, "userId");
+    await requireUser(list.id, userId);
+
+    // users の UPDATE は既存トリガーで revision を進めるため、
+    // 他端末のバッジもポーリングで散っていく。
+    await sql`
+      UPDATE public.users SET notification_read_at = clock_timestamp()
+      WHERE id = ${userId} AND list_id = ${list.id}
+    `;
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
   app.get("/api/lists/:token", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
+
+    // 通知は宛先ごとに分かれるため、userId が有効なメンバーのときだけ
+    // その人の通知を同梱する。指定がなければ通知より前の互換応答とする。
+    const requestedUserId = c.req.query("userId");
+    const viewer = requestedUserId
+      ? await findUser(list.id, requestedUserId)
+      : null;
+    if (requestedUserId && !viewer)
+      throw new ApiException(404, "user not found");
 
     const [
       usersResult,
@@ -776,15 +1036,22 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       subtasksResult,
       subtaskMemosResult,
       activitiesResult,
+      notificationsResult,
     ] = await Promise.all([
-      sql`SELECT id, name, created_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
-      sql`SELECT id, title, description, status, priority, due, assignee_id, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
+      sql`SELECT id, name, created_at, notification_read_at FROM public.users WHERE list_id = ${list.id} ORDER BY created_at, id`,
+      sql`SELECT id, title, description, status, priority, due, assignee_id, tags, approval_status, approval_reason, created_at, updated_at FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL ORDER BY created_at, id`,
       sql`SELECT m.id, m.todo_id, m.user_id, m.body, m.created_at FROM public.memos m JOIN public.todos t ON t.id = m.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
       // 親TODOのソフト削除中は、復元までサブタスクも取得結果から隠す。
       sql`SELECT s.id, s.todo_id, s.title, s.status, s.priority, s.due, s.created_at, s.updated_at FROM public.subtasks s JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY s.created_at, s.id`,
       sql`SELECT m.id, m.subtask_id, m.body, m.created_at FROM public.subtask_memos m JOIN public.subtasks s ON s.id = m.subtask_id JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
       // 最新順に取得して上位 ACTIVITY_LIMIT 件に絞り、応答では時系列(昇順)に戻す。
       sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at DESC, id DESC LIMIT ${ACTIVITY_LIMIT}`,
+      // 通知は自分宛だけ。userId 未指定のときは NULL との比較で該当ゼロになる。
+      sql`SELECT n.id, n.todo_id, n.actor_id, n.kind, n.body, n.created_at
+          FROM public.notifications n
+          WHERE n.list_id = ${list.id} AND n.user_id = ${viewer?.id ?? null}
+          ORDER BY n.created_at DESC, n.id DESC
+          LIMIT ${NOTIFICATION_LIMIT}`,
     ]);
 
     const notesByTodo = new Map<string, Note[]>();
@@ -833,6 +1100,9 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
         id: user.id,
         name: user.name,
         createdAt: toIso(user.created_at),
+        notificationReadAt: user.notification_read_at
+          ? toIso(user.notification_read_at)
+          : null,
       })),
       todos: rowsOf<TodoRow>(todosResult).map((todo): CloudTodo => ({
         ...toCloudTodo(todo),
@@ -851,6 +1121,16 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
           after: activity.after,
           createdAt: toIso(activity.created_at),
         })),
+      notifications: rowsOf<NotificationRow>(notificationsResult).map(
+        (notification): Notification => ({
+          id: notification.id,
+          todoId: notification.todo_id,
+          userId: notification.actor_id,
+          kind: notification.kind as NotificationKind,
+          body: notification.body,
+          createdAt: toIso(notification.created_at),
+        }),
+      ),
     };
     return c.json(state);
   });
