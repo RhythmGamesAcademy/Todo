@@ -14,6 +14,7 @@ CREATE TABLE users (
   list_id     UUID NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  notification_read_at TIMESTAMPTZ,
   UNIQUE (list_id, name)
 );
 
@@ -28,6 +29,11 @@ CREATE TABLE todos (
   deleted_at  TIMESTAMPTZ,
   assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
   created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  tags        TEXT[] NOT NULL DEFAULT '{}',
+  approval_status TEXT CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+  approval_reason TEXT,
+  approval_by     UUID REFERENCES users(id) ON DELETE SET NULL,
+  approval_at     TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -58,6 +64,25 @@ CREATE TABLE memos (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 自分宛の通知。user_id は宛先、actor_id は操作者。
+CREATE TABLE notifications (
+  id         UUID PRIMARY KEY,
+  list_id    UUID NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+  todo_id    UUID REFERENCES todos(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (
+    kind IN (
+      'mention',
+      'todo.assigned',
+      'approval.approved',
+      'approval.rejected'
+    )
+  ),
+  body       TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE activities (
   id         UUID PRIMARY KEY,
   list_id    UUID NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
@@ -72,7 +97,9 @@ CREATE TABLE activities (
       'user.joined',
       'user.renamed',
       'user.removed',
-      'list.renamed'
+      'list.renamed',
+      'approval.approved',
+      'approval.rejected'
     )
   ),
   field      TEXT,
@@ -87,6 +114,9 @@ CREATE INDEX subtasks_todo_id_idx ON subtasks (todo_id);
 CREATE INDEX subtask_memos_subtask_id_idx ON subtask_memos (subtask_id);
 CREATE INDEX subtask_memos_created_at_idx ON subtask_memos (created_at);
 CREATE INDEX memos_todo_id_idx ON memos (todo_id);
+CREATE INDEX notifications_list_user_created_idx
+  ON notifications (list_id, user_id, created_at);
+CREATE INDEX notifications_todo_id_idx ON notifications (todo_id);
 CREATE INDEX activities_list_created_idx ON activities (list_id, created_at);
 CREATE INDEX activities_todo_id_idx ON activities (todo_id);
 CREATE INDEX users_list_id_idx ON users (list_id);
@@ -113,6 +143,11 @@ BEGIN
     SELECT t.list_id INTO target_list_id
     FROM todos t
     WHERE t.id = CASE WHEN TG_OP = 'DELETE' THEN OLD.todo_id ELSE NEW.todo_id END;
+  ELSIF TG_TABLE_NAME = 'notifications' THEN
+    target_list_id := CASE
+      WHEN TG_OP = 'DELETE' THEN OLD.list_id
+      ELSE NEW.list_id
+    END;
   ELSIF TG_OP = 'DELETE' THEN
     target_list_id := OLD.list_id;
   ELSE
@@ -136,6 +171,10 @@ FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
 
 CREATE TRIGGER subtask_memos_bump_revision
 AFTER INSERT OR UPDATE OR DELETE ON subtask_memos
+FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
+
+CREATE TRIGGER notifications_bump_revision
+AFTER INSERT OR UPDATE OR DELETE ON notifications
 FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
 
 CREATE TRIGGER users_bump_revision
