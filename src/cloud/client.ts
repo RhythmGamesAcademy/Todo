@@ -95,8 +95,13 @@ export async function join(token: string, name: string): Promise<Session> {
   return { token, userId: data.userId, name: data.name };
 }
 
-export async function fetchState(token: string): Promise<CloudState> {
-  const data = await apiFetch<unknown>(listPath(token));
+export async function fetchState(
+  token: string,
+  userId?: string | null,
+): Promise<CloudState> {
+  // userId が有効なメンバーのときだけ、その人宛の通知を同梱してもらう。
+  const query = userId ? "?userId=" + encodeURIComponent(userId) : "";
+  const data = await apiFetch<unknown>(listPath(token) + query);
   return parseCloudState(data);
 }
 
@@ -228,6 +233,34 @@ export async function sendSubtaskMemo(
 }
 
 export const addSubtaskMemo = sendSubtaskMemo;
+
+/** 申請タグ付きTODOを承認する。申請タグが付いていないTODOでは400になる。 */
+export async function approveTodo(token: string, id: string): Promise<void> {
+  await apiFetch<void>(
+    listPath(token) + "/todos/" + encodeURIComponent(id) + "/approve",
+    jsonInit("POST", withCaller(token, {})),
+  );
+}
+
+/** 申請タグ付きTODOを否認する。理由が空のまま送らない(400になる)。 */
+export async function rejectTodo(
+  token: string,
+  id: string,
+  reason: string,
+): Promise<void> {
+  await apiFetch<void>(
+    listPath(token) + "/todos/" + encodeURIComponent(id) + "/reject",
+    jsonInit("POST", withCaller(token, { reason })),
+  );
+}
+
+/** 通知パネルを開いた時点で全既読にする(バッジを0に寄せる)。 */
+export async function markNotificationsRead(token: string): Promise<void> {
+  await apiFetch<void>(
+    listPath(token) + "/notifications/read",
+    jsonInit("POST", withCaller(token, {})),
+  );
+}
 
 export async function renameList(token: string, title: string): Promise<void> {
   await apiFetch<void>(

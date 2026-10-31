@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../messages";
 import {
   ApiError,
+  approveTodo,
   createSubtask,
   createList,
   createTodo,
@@ -11,8 +12,10 @@ import {
   fetchRevision,
   fetchState,
   join,
+  markNotificationsRead,
   patchTodo,
   patchSubtask,
+  rejectTodo,
   renameList,
   sendMemo,
   sendSubtaskMemo,
@@ -37,6 +40,9 @@ const validState = (): CloudState => ({
       priority: "high",
       status: "doing",
       assigneeId: "user-1",
+      tags: [],
+      approvalStatus: null,
+      approvalReason: null,
       createdAt: NOW,
       updatedAt: NOW,
       subtasks: [],
@@ -269,6 +275,7 @@ describe("呼び出し元の userId", () => {
       priority: "medium",
       status: "todo",
       assigneeId: null,
+      tags: [],
     });
     expect(bodyOf(createMock)).toEqual({
       title: "新規",
@@ -277,6 +284,7 @@ describe("呼び出し元の userId", () => {
       priority: "medium",
       status: "todo",
       assigneeId: null,
+      tags: [],
       userId: "user-1",
     });
     vi.unstubAllGlobals();
@@ -318,5 +326,58 @@ describe("呼び出し元の userId", () => {
     await patchTodo("tok-1", "todo-1", { status: "done" });
 
     expect(bodyOf(mock)).toEqual({ status: "done" });
+  });
+});
+
+describe("申請の承認・否認と通知の全既読", () => {
+  it("approveTodo は approve エンドポイントへ userId を添えて POST する", async () => {
+    writeSession(session);
+    const mock = stubFetch({ body: { revision: 8 } });
+
+    await approveTodo("tok-1", "todo-1");
+
+    expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1/todos/todo-1/approve");
+    expect(mock.mock.calls[0][1]?.method).toBe("POST");
+    expect(bodyOf(mock)).toEqual({ userId: "user-1" });
+  });
+
+  it("rejectTodo は否認理由を body に載せる", async () => {
+    writeSession(session);
+    const mock = stubFetch({ body: { revision: 8 } });
+
+    await rejectTodo("tok-1", "todo-1", "期限に間に合わないため");
+
+    expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1/todos/todo-1/reject");
+    expect(bodyOf(mock)).toEqual({
+      reason: "期限に間に合わないため",
+      userId: "user-1",
+    });
+  });
+
+  it("markNotificationsRead は notifications/read へ POST する", async () => {
+    writeSession(session);
+    const mock = stubFetch({ body: { revision: 9 } });
+
+    await markNotificationsRead("tok-1");
+
+    expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1/notifications/read");
+    expect(mock.mock.calls[0][1]?.method).toBe("POST");
+    expect(bodyOf(mock)).toEqual({ userId: "user-1" });
+  });
+
+  it("fetchState は userId をクエリに付けて通知を受け取る", async () => {
+    const mock = stubFetch();
+
+    await fetchState("tok-1", "user-1");
+
+    expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1?userId=user-1");
+  });
+
+  it("userId がなければクエリを付けない(旧API互換)", async () => {
+    const mock = stubFetch();
+
+    await fetchState("tok-1");
+
+    expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1");
   });
 });

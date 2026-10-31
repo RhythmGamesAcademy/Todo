@@ -3,6 +3,7 @@ import { messages } from "../messages";
 import type { SubtaskDraft, SubtaskPatch, TodoDraft } from "../model";
 import {
   ApiError,
+  approveTodo as approveTodoApi,
   createSubtask,
   createTodo,
   deleteSubtask,
@@ -10,8 +11,10 @@ import {
   deleteTodo,
   fetchRevision,
   fetchState,
+  markNotificationsRead as markNotificationsReadApi,
   patchTodo,
   patchSubtask,
+  rejectTodo as rejectTodoApi,
   removeUser,
   renameList,
   renameUser,
@@ -53,6 +56,9 @@ export type BoardActions = {
   renameMember: (id: string, name: string) => Promise<void>;
   removeMember: (id: string) => Promise<void>;
   setAssignee: (id: string, assigneeId: string | null) => Promise<void>;
+  approveTodo: (id: string) => Promise<void>;
+  rejectTodo: (id: string, reason: string) => Promise<void>;
+  markNotificationsRead: () => Promise<void>;
 };
 
 export type UseBoardResult = Board & BoardActions & { refresh: () => void };
@@ -103,7 +109,7 @@ export function useBoard(
 
     const load = async () => {
       try {
-        const state = await fetchState(me.token);
+        const state = await fetchState(me.token, me.userId);
         if (cancelled) return;
         // 遅れて届いた古い応答で新しい state を上書きしない。
         if (state.list.revision < revision) return;
@@ -120,7 +126,7 @@ export function useBoard(
       try {
         const next = await fetchRevision(me.token);
         if (cancelled || !polling || next <= revision) return;
-        const state = await fetchState(me.token);
+        const state = await fetchState(me.token, me.userId);
         if (cancelled || state.list.revision < revision) return;
         revision = state.list.revision;
         setBoard({ phase: "ready", state, me });
@@ -220,6 +226,19 @@ export function useBoard(
     (id: string, assigneeId: string | null) => updateTodo(id, { assigneeId }),
     [updateTodo],
   );
+  const approveTodo = useCallback(
+    (id: string) => run((current) => approveTodoApi(current, id)),
+    [run],
+  );
+  const rejectTodo = useCallback(
+    (id: string, reason: string) =>
+      run((current) => rejectTodoApi(current, id, reason)),
+    [run],
+  );
+  const markNotificationsRead = useCallback(
+    () => run((current) => markNotificationsReadApi(current)),
+    [run],
+  );
 
   return {
     ...board,
@@ -238,5 +257,8 @@ export function useBoard(
     renameMember,
     removeMember,
     setAssignee,
+    approveTodo,
+    rejectTodo,
+    markNotificationsRead,
   };
 }

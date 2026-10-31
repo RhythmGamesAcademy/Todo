@@ -26,6 +26,9 @@ const makeState = (revision: number): CloudState => ({
       priority: "high",
       status: "doing",
       assigneeId: "user-1",
+      tags: [],
+      approvalStatus: null,
+      approvalReason: null,
       createdAt: NOW,
       updatedAt: NOW,
       subtasks: [],
@@ -231,6 +234,9 @@ describe("アクション", () => {
               priority: draft.priority,
               status: draft.status,
               assigneeId: draft.assigneeId,
+              tags: draft.tags ?? [],
+              approvalStatus: null,
+              approvalReason: null,
               createdAt: NOW,
               updatedAt: NOW,
               subtasks: [],
@@ -254,6 +260,7 @@ describe("アクション", () => {
         priority: "medium",
         status: "todo",
         assigneeId: null,
+        tags: [],
       });
     });
 
