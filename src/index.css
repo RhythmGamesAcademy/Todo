@@ -2710,6 +2710,17 @@ input[type="checkbox"] {
   flex-direction: column;
   gap: 10px;
   margin-top: 26px;
+  padding: 18px 27px 20px;
+  border-top: 1px solid #e8edf4;
+}
+.attachments-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.attachments-heading .subtasks-title h3 {
+  margin: 0;
 }
 .attachment-uploader {
   border: 1.5px dashed #c4d2e4;

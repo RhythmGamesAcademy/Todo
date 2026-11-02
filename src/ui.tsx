@@ -1446,7 +1446,7 @@ export function TodoDetail({
         )}
       </section>
       <section className="attachments" aria-labelledby="attachments-heading">
-        <div className="subtasks-heading">
+        <div className="attachments-heading">
           <div className="subtasks-title">
             <h3 id="attachments-heading">{messages.attachment.heading}</h3>
             <span>{(todo.attachments ?? []).length}</span>
