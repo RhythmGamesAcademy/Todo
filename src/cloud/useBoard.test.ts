@@ -33,6 +33,7 @@ const makeState = (revision: number): CloudState => ({
       updatedAt: NOW,
       subtasks: [],
       notes: [],
+      attachments: [],
     },
   ],
   activities: [],
@@ -241,6 +242,7 @@ describe("アクション", () => {
               updatedAt: NOW,
               subtasks: [],
               notes: [],
+              attachments: [],
             },
           ],
         };

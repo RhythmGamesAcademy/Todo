@@ -17,6 +17,8 @@ export interface Note {
   createdAt: string;
   editedAt?: string;
   userId: string | null;
+  /** TODOメモ単位の添付。旧API/旧バックアップでは存在しないため任意。 */
+  attachments?: Attachment[];
 }
 export interface SubtaskMemo {
   id: string;
@@ -32,6 +34,19 @@ export interface Subtask {
   createdAt: string;
   updatedAt: string;
   memos: SubtaskMemo[];
+}
+/**
+ * 添付ファイル。ファイル本体はDiscord CDNにあり、ここには識別情報と
+ * メタデータだけを持つ。署名付きURLは永続保存せず、必要なときだけAPIから
+ * 取り直す。
+ */
+export interface Attachment {
+  id: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: string;
+  createdBy: string | null;
 }
 export interface Todo {
   id: string;
@@ -49,6 +64,8 @@ export interface Todo {
   updatedAt: string;
   notes: Note[];
   subtasks: Subtask[];
+  /** TODO単位の添付。旧API/旧バックアップでは存在しないため任意。 */
+  attachments?: Attachment[];
 }
 export interface TodoDraft {
   title: string;
@@ -70,6 +87,79 @@ export type SubtaskPatch = Partial<SubtaskDraft>;
 export const STATUS: Record<Status, string> = messages.status;
 export const PRIORITY: Record<Priority, string> = messages.priority;
 export const FILTER_LABEL: Record<Filter, string> = messages.filters.heading;
+/** 添付ファイルの1個あたりの上限。Vercel Functionsの4.5MB制限に余裕を持たせる。 */
+export const MAX_ATTACHMENT_SIZE_BYTES = 3 * 1024 * 1024;
+/** 一度に選択できる添付の上限。逐次アップロードは別。 */
+export const MAX_ATTACHMENTS_PER_PICK = 5;
+export type AttachmentCategory = "image" | "video" | "file";
+
+/**
+ * ファイル名/MIMEから添付の表示区分を推定する。
+ * MOVは再生向きでなくダウンロード中心のため「file」として扱う。
+ */
+export function attachmentCategory(
+  filename: string,
+  contentType: string,
+): AttachmentCategory {
+  if (
+    contentType === "image/jpeg" ||
+    contentType === "image/png" ||
+    contentType === "image/webp" ||
+    contentType === "image/gif"
+  )
+    return "image";
+  if (contentType === "video/mp4" || contentType === "video/webm")
+    return "video";
+  if (contentType === "video/quicktime") return "file";
+  const ext = filenameExt(filename);
+  if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return "image";
+  if (["mp4", "webm"].includes(ext)) return "video";
+  return "file";
+}
+
+/** 拡張子だけの取り出し(小文字化)。不明な場合は空文字。 */
+function filenameExt(filename: string): string {
+  const base = filename.split(/[\\/]/).at(-1) ?? "";
+  const dot = base.lastIndexOf(".");
+  return dot === -1 ? "" : base.slice(dot + 1).toLowerCase();
+}
+
+/** 初期実装で受け付ける拡張子。api/src/attachment.ts と揃える。 */
+const ALLOWED_ATTACHMENT_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "gif",
+  "mp4",
+  "webm",
+  "mov",
+  "pptx",
+  "pdf",
+  "txt",
+];
+
+/**
+ * 選択したファイルのブラウザ側検証。問題なければ null、
+ * あれば日本語のエラーメッセージを返す(送信前に足切りする)。
+ */
+export function attachmentFileError(file: File): string | null {
+  const ext = filenameExt(file.name);
+  if (!ALLOWED_ATTACHMENT_EXTENSIONS.includes(ext))
+    return messages.attachment.unknownType(file.name);
+  if (file.size <= 0) return messages.attachment.emptyFile;
+  if (file.size > MAX_ATTACHMENT_SIZE_BYTES)
+    return messages.attachment.maxSize(file.name);
+  return null;
+}
+
+/** 添付ファイルの容量表示(日本語UI文言)。 */
+export function fileSizeText(bytes: number): string {
+  if (bytes >= 1024 * 1024)
+    return messages.common.sizeMiB(bytes / (1024 * 1024));
+  if (bytes >= 1024) return messages.common.sizeKiB(bytes / 1024);
+  return messages.common.sizeBytes(bytes);
+}
 export const pad = (n: number) => String(n).padStart(2, "0");
 export function clockText(date: Date) {
   return messages.dateTime.clock(date);

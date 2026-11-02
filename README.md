@@ -6,6 +6,24 @@
 
 https://github.com/user-attachments/assets/892dc094-22d2-45e4-be10-b221142fe6bd
 
+### 添付ファイル（Discord CDN）
+
+TODOとメモにはファイルを添付できます。ファイル本体はDiscordの専用チャンネルにBotがメッセージとして投稿し、サーバーのDBにはメッセージIDなどの識別情報だけを保存します。閲覧時には、DiscordのCDNから署名付きURLを都度引き直して表示します。
+
+- 対応形式：JPG／PNG／WebP／GIF（画像）、MP4／WebM／MOV（動画）、PPTX／PDF／TXT（ファイル）。拡張子・MIME宣言・マジックナンバーのすべてを検証します
+- 1ファイル3MiBまで（Vercel Functionsの本文上限に余裕を持たせた値）、1リクエストにつき1ファイル。複数ファイルはフロントエンドが逐次アップロードし、一度に選択できるのは5件まで。1TODOあたり（TODO単位＋メモ単位の合計）最大50件
+- メモ欄では本文と最初のファイルをまとめて送信でき、送信後も作成済みメモへ追加できます
+- 取り込み失敗や容量超過はタスクの保存を妨げません
+
+使うには、`.env.local` と Vercel の環境変数にDiscord Botの設定を追加します（`.env.example` の雛形を参照）。
+
+```sh
+DISCORD_BOT_TOKEN=<Botのトークン>
+DISCORD_CHANNEL_ID=<添付の投稿先となる専用チャンネルID>
+```
+
+Botには投稿先チャンネルへの「チャンネル閲覧」「メッセージを送信」「メッセージ管理（削除する場合）」の権限を与えます。トークンはクライアントへ返さず、サーバー側だけで管理します。
+
 ## 開発
 
 Node.js 22.12以降（推奨: Node.js 24）を使用してください。
@@ -52,6 +70,7 @@ TODOを管理するだけでは、「どこまで進めたか」「次に何を�
 
 - 共有リストの作成と、招待URL（`#token=`）＋表示名での参加
 - TODOの作成・編集・削除と、削除直後の取り消し
+- TODO・メモへのファイル添付（画像・動画・PPTX・PDF・TXT。1ファイル3MiBまで、1TODOあたり最大50件。保存先はDiscord CDN）
 - 期限日時（任意）、優先度（選択欄は左から低・中・高）、状態（未着手・進行中・完了）、担当者
 - 期限なしの新規作成、または期限ありから期限なしに変更する際の確認
 - カードから開く詳細モーダルと、追記専用のチャット形式メモ
@@ -188,6 +207,12 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_subtasks.sql
 
 適用後は `subtasks` と `subtask_memos` が存在すること、TODO削除時に関連するサブタスクとサブタスクメモも削除されることを検証してください。
 
+添付ファイル機能を利用する既存DBには、追加で次のマイグレーションを適用します。既存データには影響せず、attachmentsテーブルと索引を追加します。
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/004_attachments.sql
+```
+
 接続文字列はコードやコミットに含めないでください。ローカルでは `.env.local` などGit管理外のファイルに置きます（`.env.example` は項目名だけの雛形です）。
 
 ### Vercelへのデプロイ
@@ -226,8 +251,8 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 
 ### クラウド連携
 
-- src/cloud/types.ts: 共有リストのAPI型（`CloudState`・`CloudTodo`・`CloudUser`・`Activity`）
-- src/cloud/parse.ts / parse.test.ts: サーバー応答の検証とクライアント型への変換
+- src/cloud/types.ts: 共有リストのAPI型（`CloudState`・`CloudTodo`・`CloudUser`・`Activity`・`Attachment`）
+- src/cloud/parse.ts / parse.test.ts: サーバー応答の検証とクライアント型への変換（添付メタデータの検証を含む）
 - src/cloud/session.ts / session.test.ts: セッションの保存・読み込みと `#token=` の解決
 - src/cloud/client.ts / client.test.ts: API呼び出しとエラー変換
 - src/cloud/useBoard.ts / useBoard.test.ts: 3秒ポーリング、revision監視、変更アクション、セッション失効
@@ -237,13 +262,16 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 
 - api/index.ts: Vercel向けHonoエントリ（`DATABASE_URL` でNeonへ接続）
 - api/dev.ts: ローカル開発用のAPI起動（`npm run dev:api` で `@hono/node-server` により3000番ポートで待ち受ける）
-- api/src/app.ts / app.test.ts: リスト・メンバー・TODO・メモ・履歴のHTTPルート
+- api/src/app.ts / app.test.ts: リスト・メンバー・TODO・メモ・履歴・添付のHTTPルート
 - api/src/domain.ts / domain.test.ts: 入力検証、トークン生成、履歴の差分計算
+- api/src/attachment.ts / attachment.test.ts: 添付ファイルの検証（拡張子・MIME・マジックナンバー・容量上限）
+- api/src/discord.ts: Discord CDNへの投稿・取得・削除（Bot Token。429の再試行を含む）
 - api/src/sql.ts: Neonクライアントとトランザクションのアダプター
-- db/schema.sql: lists・users・todos・subtasks・subtask_memos・memos・activitiesのスキーマとrevision更新トリガー
+- db/schema.sql: lists・users・todos・subtasks・subtask_memos・memos・attachments・activitiesのスキーマとrevision更新トリガー
 - db/migrations/001_subtasks.sql: 既存DBへサブタスク用テーブル・索引・revision更新トリガーを追加する再実行可能なマイグレーション
-- vercel.json: `/api` をHonoエントリへ転送するrewrite
-- .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` の項目名だけの雛形
+- db/migrations/004_attachments.sql: 既存DBへ添付（attachments）テーブル・索引を追加する再実行可能なマイグレーション
+- vercel.json: `/api` をHonoエントリへ転送するrewrite。CSPの `img-src`／`media-src` に `cdn.discordapp.com` を含む
+- .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` / `DISCORD_BOT_TOKEN` / `DISCORD_CHANNEL_ID` の項目名だけの雛形
 
 ### 完了の演出
 

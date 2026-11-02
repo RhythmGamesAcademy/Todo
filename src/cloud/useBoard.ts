@@ -6,9 +6,11 @@ import {
   approveTodo as approveTodoApi,
   createSubtask,
   createTodo,
+  deleteAttachment as deleteAttachmentApi,
   deleteSubtask,
   deleteList,
   deleteTodo,
+  fetchAttachmentUrl as fetchAttachmentUrlApi,
   fetchRevision,
   fetchState,
   markNotificationsRead as markNotificationsReadApi,
@@ -20,7 +22,10 @@ import {
   renameUser,
   restoreTodo,
   sendMemo,
+  sendMemoWithAttachment,
   sendSubtaskMemo,
+  uploadMemoAttachment,
+  uploadTodoAttachment,
 } from "./client";
 import type { Session } from "./session";
 import type { CloudState, TodoPatch } from "./types";
@@ -59,6 +64,33 @@ export type BoardActions = {
   approveTodo: (id: string) => Promise<void>;
   rejectTodo: (id: string, reason: string) => Promise<void>;
   markNotificationsRead: () => Promise<void>;
+  /** TODO単位のファイル添付。1リクエストにつき1ファイルで逐次に送る。 */
+  addTodoAttachment: (todoId: string, file: File) => Promise<void>;
+  /** メモ単位のファイル添付(作成済みメモへの追加)。 */
+  addMemoAttachment: (
+    todoId: string,
+    memoId: string,
+    file: File,
+  ) => Promise<void>;
+  /** 本文と最初のファイルを同時に投稿する。 */
+  addMemoWithAttachment: (
+    todoId: string,
+    body: string,
+    file: File,
+  ) => Promise<void>;
+  /**
+   * 本文と複数ファイルの逐次投稿。最初のファイルはメモ作成と同時に送り、
+   * 2個目以降は作成済みメモへ追加する。1件でも失敗したら false。
+   */
+  addMemoWithFiles: (
+    todoId: string,
+    body: string,
+    files: readonly File[],
+  ) => Promise<boolean>;
+  /** 添付ファイルの削除。 */
+  removeAttachment: (attachmentId: string) => Promise<void>;
+  /** Discord 署名付きURLの再取得。表示のときだけ必要に応じて呼ぶ。 */
+  attachmentUrl: (attachmentId: string) => Promise<string>;
 };
 
 export type UseBoardResult = Board & BoardActions & { refresh: () => void };
@@ -238,6 +270,60 @@ export function useBoard(
     () => run((current) => markNotificationsReadApi(current)),
     [run],
   );
+  const addTodoAttachment = useCallback(
+    (todoId: string, file: File) =>
+      run((current) => uploadTodoAttachment(current, todoId, file)),
+    [run],
+  );
+  const addMemoAttachment = useCallback(
+    (todoId: string, memoId: string, file: File) =>
+      run((current) => uploadMemoAttachment(current, todoId, memoId, file)),
+    [run],
+  );
+  const addMemoWithAttachment = useCallback(
+    (todoId: string, body: string, file: File) =>
+      run((current) =>
+        sendMemoWithAttachment(current, todoId, body, file).then(() => {}),
+      ),
+    [run],
+  );
+  const addMemoWithFiles = useCallback(
+    async (todoId: string, body: string, files: readonly File[]) => {
+      const current = sessionRef.current;
+      if (!current) return false;
+      try {
+        if (files.length === 0) {
+          if (body.trim()) await sendMemo(current.token, todoId, body.trim());
+        } else {
+          // 1件目はメモ作成と同時に。以後は1件ずつ順番に送る(4.5MB制限対策)。
+          const created = await sendMemoWithAttachment(
+            current.token,
+            todoId,
+            body,
+            files[0],
+          );
+          for (const file of files.slice(1))
+            await uploadMemoAttachment(current.token, todoId, created.id, file);
+        }
+        await reloadRef.current();
+        return true;
+      } catch {
+        // 失敗時も本文と選択ファイルは保持して、呼び出し側に再試行を委ねる。
+        return false;
+      }
+    },
+    [],
+  );
+  const removeAttachment = useCallback(
+    (attachmentId: string) =>
+      run((current) => deleteAttachmentApi(current, attachmentId)),
+    [run],
+  );
+  const attachmentUrl = useCallback(async (attachmentId: string) => {
+    const current = sessionRef.current;
+    if (!current) throw new ApiError(401, "no session");
+    return (await fetchAttachmentUrlApi(current.token, attachmentId)).url;
+  }, []);
 
   return {
     ...board,
@@ -259,5 +345,11 @@ export function useBoard(
     approveTodo,
     rejectTodo,
     markNotificationsRead,
+    addTodoAttachment,
+    addMemoAttachment,
+    addMemoWithAttachment,
+    addMemoWithFiles,
+    removeAttachment,
+    attachmentUrl,
   };
 }

@@ -1,6 +1,12 @@
 import { messages } from "../messages";
 import { record, validDate } from "../model";
-import type { ApprovalStatus, Priority, Status, SubtaskStatus } from "../model";
+import type {
+  ApprovalStatus,
+  Attachment,
+  Priority,
+  Status,
+  SubtaskStatus,
+} from "../model";
 import type { ActivityKind, CloudState, NotificationKind } from "./types";
 
 const STATUSES: readonly Status[] = ["todo", "doing", "done"];
@@ -126,6 +132,42 @@ const validateAssigneeIds = (x: unknown): x is string[] | undefined => {
 const validateLegacyAssigneeId = (x: unknown): x is string | null | undefined =>
   x === undefined || x === null || validId(x);
 
+function validateAttachment(value: unknown, ids: Set<string>): void {
+  if (
+    !record(value) ||
+    !validId(value.id) ||
+    ids.has(value.id) ||
+    !(typeof value.filename === "string" && value.filename.length <= 255) ||
+    !(
+      typeof value.contentType === "string" && value.contentType.length <= 255
+    ) ||
+    !(
+      typeof value.sizeBytes === "number" &&
+      Number.isSafeInteger(value.sizeBytes) &&
+      value.sizeBytes > 0
+    ) ||
+    !isIsoTimestamp(value.createdAt) ||
+    !(
+      value.createdBy === null ||
+      (typeof value.createdBy === "string" && !!value.createdBy.trim())
+    )
+  )
+    return fail();
+  ids.add(value.id);
+}
+
+// 添付は旧API/旧バックアップでは存在しないため optional で受け、
+// あるときは形(上限個数を含む)を検証する。ページングがないため濫用を防ぐ
+// 上限をここでも設ける。
+const MAX_ATTACHMENTS = 50;
+const validateAttachments = (x: unknown): x is Attachment[] | undefined => {
+  if (x === undefined) return true;
+  if (!Array.isArray(x) || x.length > MAX_ATTACHMENTS) return false;
+  const ids = new Set<string>();
+  for (const attachment of x) validateAttachment(attachment, ids);
+  return true;
+};
+
 function validateNote(value: unknown, ids: Set<string>): void {
   if (
     !record(value) ||
@@ -137,7 +179,8 @@ function validateNote(value: unknown, ids: Set<string>): void {
     !(
       value.userId === null ||
       (typeof value.userId === "string" && !!value.userId.trim())
-    )
+    ) ||
+    !validateAttachments(value.attachments)
   )
     return fail();
   ids.add(value.id);
@@ -198,7 +241,8 @@ function validateTodo(value: unknown, ids: Set<string>): void {
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt) ||
     !Array.isArray(value.notes) ||
-    !(value.subtasks === undefined || Array.isArray(value.subtasks))
+    !(value.subtasks === undefined || Array.isArray(value.subtasks)) ||
+    !validateAttachments(value.attachments)
   )
     return fail();
   ids.add(value.id);
@@ -271,6 +315,12 @@ export function parseCloudState(input: unknown): CloudState {
       approvalStatus: todo.approvalStatus ?? null,
       approvalReason: todo.approvalReason ?? null,
       subtasks: todo.subtasks ?? [],
+      // 添付は旧API/旧バックアップでは存在しないため空配列として扱う。
+      attachments: todo.attachments ?? [],
+      notes: todo.notes.map((note: Record<string, unknown>) => ({
+        ...note,
+        attachments: note.attachments ?? [],
+      })),
       // 複数担当は新フィールド assigneeIds。旧単数 assigneeId は
       // 順序を保ったまま配列に読み替えて後段を単純にする。
       assigneeIds: normalizeAssigneeIds(todo.assigneeIds, todo.assigneeId),

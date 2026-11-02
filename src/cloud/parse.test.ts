@@ -106,10 +106,24 @@ const broken = (
 const reject = (input: unknown) =>
   expect(() => parseCloudState(input)).toThrow(messages.errors.invalidState);
 
+const validAttachment = () => ({
+  id: "attachment-1",
+  filename: "設計書.png",
+  contentType: "image/png",
+  sizeBytes: 1024,
+  createdAt: now,
+  createdBy: "user-1",
+});
+
 describe("parseCloudState", () => {
-  it("正しい共有データをそのまま返す", () => {
+  it("正しい共有データをそのまま返す(添付がない場合は空配列を補完)", () => {
     const state = validState();
-    expect(parseCloudState(state)).toEqual(state);
+    const parsed = parseCloudState(state);
+    // 添付は旧API/旧バックアップに無く、空配列として扱うため補完される。
+    for (const todo of parsed.todos) expect(todo.attachments).toEqual([]);
+    for (const todo of parsed.todos)
+      for (const note of todo.notes) expect(note.attachments).toEqual([]);
+    expect({ ...parsed, todos: state.todos }).toEqual(state);
   });
 
   it("サブタスクとメモの必須項目を検証する", () => {
@@ -125,7 +139,21 @@ describe("parseCloudState", () => {
     };
     const state = validState();
     state.todos[0].subtasks = [subtask];
-    expect(parseCloudState(state)).toEqual(state);
+    expect(parseCloudState(state)).toEqual({
+      ...state,
+      todos: [
+        {
+          ...state.todos[0],
+          // 添付は旧データでも存在しないため空配列に補う。
+          attachments: [],
+          notes: state.todos[0].notes.map((note) => ({
+            ...note,
+            attachments: [],
+          })),
+        },
+        { ...state.todos[1], attachments: [] },
+      ],
+    });
     const brokenSubtask = (change: (state: any) => void) => {
       const next = validState();
       next.todos[0].subtasks = [structuredClone(subtask)];
@@ -383,5 +411,76 @@ describe("parseCloudState", () => {
     ).notificationReadAt = null;
     expect(() => parseCloudState(state)).not.toThrow();
     reject(broken((s) => (s.users[0].notificationReadAt = "not-a-date")));
+  });
+
+  it("TODO単位とメモ単位の添付を検証して返す", () => {
+    const state = validState();
+    state.todos[0].attachments = [validAttachment()];
+    state.todos[0].notes[0].attachments = [
+      { ...validAttachment(), id: "attachment-2" },
+    ];
+    const parsed = parseCloudState(state);
+    expect(parsed.todos[0].attachments).toHaveLength(1);
+    expect(parsed.todos[0].attachments?.[0]?.filename).toBe("設計書.png");
+    expect(parsed.todos[0].notes[0].attachments).toHaveLength(1);
+  });
+
+  it("添付の異常値を拒否する", () => {
+    reject(
+      broken(
+        (s) =>
+          (s.todos[0].attachments = [{ ...validAttachment(), sizeBytes: 0 }]),
+      ),
+    );
+    reject(
+      broken(
+        (s) =>
+          (s.todos[0].attachments = [{ ...validAttachment(), sizeBytes: -1 }]),
+      ),
+    );
+    reject(
+      broken(
+        (s) =>
+          (s.todos[0].attachments = [
+            { ...validAttachment(), createdAt: "not-a-date" },
+          ]),
+      ),
+    );
+    reject(
+      broken(
+        (s) =>
+          (s.todos[0].attachments = [{ ...validAttachment(), filename: 1 }]),
+      ),
+    );
+    reject(
+      broken(
+        (s) => (s.todos[0].attachments = [{ ...validAttachment(), id: " " }]),
+      ),
+    );
+    reject(
+      broken(
+        (s) =>
+          (s.todos[0].notes[0].attachments = [
+            { ...validAttachment(), createdBy: 1 },
+          ]),
+      ),
+    );
+  });
+
+  it("添付は旧データでは任意で、50件を超えると拒否する", () => {
+    const many = Array.from({ length: 51 }, (_, index) => ({
+      ...validAttachment(),
+      id: "attachment-" + index,
+    }));
+    reject(broken((s) => (s.todos[0].attachments = many)));
+    reject(
+      broken(
+        (s) =>
+          (s.todos[0].notes[0].attachments = Array.from(
+            { length: 51 },
+            (_, index) => ({ ...validAttachment(), id: "m-" + index }),
+          )),
+      ),
+    );
   });
 });

@@ -12,6 +12,7 @@ import {
   UserRound,
   Flag,
   MessageSquare,
+  Paperclip,
   Pencil,
   Plus,
   Trash2,
@@ -30,6 +31,7 @@ import {
   toDateInput,
 } from "./model";
 import type {
+  Attachment,
   Priority,
   Status,
   Subtask,
@@ -38,8 +40,18 @@ import type {
   Todo,
   TodoDraft,
 } from "./model";
+import { attachmentFileError } from "./model";
 import type { Activity, CloudUser, TodoPatch } from "./cloud/types";
 import { computeEntries, Timeline } from "./screens/Timeline";
+import { AttachmentList } from "./components/AttachmentList";
+import { AttachmentPreview } from "./components/AttachmentPreview";
+import { AttachmentUploader } from "./components/AttachmentUploader";
+
+/** メモに仮置きした未送信ファイル。 */
+export interface PickedAttachment {
+  id: string;
+  file: File;
+}
 
 /**
  * 担当者ID配列を表示名の配列にする。リストに居ないID(削除済みメンバーの
@@ -1006,8 +1018,12 @@ export function TodoDetail({
   users,
   meId,
   activities,
+  attachmentUrl,
+  onAddAttachment,
+  onRemoveAttachment,
   onUpdate,
   onMemo,
+  onMemoWithFiles,
   onSubtaskAdd,
   onSubtaskUpdate,
   onSubtaskDelete,
@@ -1024,8 +1040,14 @@ export function TodoDetail({
   users: CloudUser[];
   meId: string | null;
   activities: Activity[];
+  /** Discord署名付きURLの再取得(表示のたびに引き直す)。 */
+  attachmentUrl: (attachmentId: string) => Promise<string>;
+  onAddAttachment: (file: File) => Promise<boolean>;
+  onRemoveAttachment: (attachmentId: string) => Promise<boolean>;
   onUpdate: (patch: TodoPatch, message: string) => Promise<boolean>;
   onMemo: (body: string) => Promise<boolean>;
+  /** 本文+ファイル(1件目)→残りを逐次送信する複合アクション。 */
+  onMemoWithFiles: (body: string, files: readonly File[]) => Promise<boolean>;
   onSubtaskAdd: (draft: SubtaskDraft) => Promise<boolean>;
   onSubtaskUpdate: (
     subtaskId: string,
@@ -1042,6 +1064,9 @@ export function TodoDetail({
   ask: (options: AskOptions) => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
+  const [picked, setPicked] = useState<PickedAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [composerDragging, setComposerDragging] = useState(false);
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
   const [pendingReveals, setPendingReveals] = useState(0);
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | "new">("");
@@ -1057,10 +1082,11 @@ export function TodoDetail({
   useEffect(() => {
     onDirty(
       !!text.trim() ||
+        picked.length > 0 ||
         subtaskFormDirty ||
         Object.values(subtaskMemos).some((memo) => !!memo.trim()),
     );
-  }, [text, subtaskFormDirty, subtaskMemos, onDirty]);
+  }, [text, picked, subtaskFormDirty, subtaskMemos, onDirty]);
   useEffect(() => {
     const added = todo.notes.length - previousNotes.current;
     if (added > 0 && pendingReveals > 0) {
@@ -1076,17 +1102,58 @@ export function TodoDetail({
     previousNotes.current = todo.notes.length;
   }, [todo.notes, pendingReveals]);
   const url = calendarUrl(todo);
+  const composeInputRef = useRef<HTMLInputElement>(null);
+  const pickComposer = (files: readonly File[]) => {
+    setAttachmentError("");
+    const remaining = 5 - picked.length;
+    if (files.length > remaining) {
+      setAttachmentError(messages.attachment.maxPick);
+      return;
+    }
+    const errors = files
+      .map((file) => attachmentFileError(file))
+      .filter((message): message is string => message !== null);
+    if (errors.length > 0) {
+      setAttachmentError(errors[0]);
+      // 形式・容量の問題がある1件は選ばない。有効なものだけ残す。
+    }
+    const valid = files.filter((file) => attachmentFileError(file) === null);
+    if (valid.length === 0) return;
+    setPicked((current) => [
+      ...current,
+      ...valid.map((file) => ({ id: crypto.randomUUID(), file })),
+    ]);
+  };
   async function post(e?: FormEvent) {
     e?.preventDefault();
     const body = text.trim();
-    if (!body) return;
+    const files = picked.map((pickedItem) => pickedItem.file);
+    if (!body && files.length === 0) return;
     // 応答の再取得でメモが届く前に印を付けておき、失敗時は取り消す。
-    setPendingReveals((count) => count + 1);
-    if (!(await onMemo(body))) {
-      setPendingReveals((count) => Math.max(0, count - 1));
+    const reveals = 1;
+    setPendingReveals((count) => count + reveals);
+    const saved = await (files.length > 0
+      ? onMemoWithFiles(body, files)
+      : onMemo(body));
+    if (!saved) {
+      setPendingReveals((count) => Math.max(0, count - reveals));
       return;
     }
     setText("");
+    setPicked([]);
+  }
+  /** TODO単位の添付を削除する(確認付き)。 */
+  async function removeAttachment(attachment: Attachment) {
+    const confirmed = await ask({
+      title: messages.attachment.deleteTitle,
+      description: messages.attachment.deleteDescription(attachment.filename),
+      confirm: messages.attachment.deleteAction,
+      cancel: messages.common.cancel,
+      danger: true,
+    });
+    if (!confirmed) return;
+    if (await onRemoveAttachment(attachment.id)) setAttachmentError("");
+    else setAttachmentError(messages.attachment.deleteFailed);
   }
   async function saveSubtask(draft: SubtaskDraft) {
     const saved =
@@ -1378,6 +1445,26 @@ export function TodoDetail({
           <p className="subtask-empty">{messages.subtask.empty}</p>
         )}
       </section>
+      <section className="attachments" aria-labelledby="attachments-heading">
+        <div className="subtasks-heading">
+          <div className="subtasks-title">
+            <h3 id="attachments-heading">{messages.attachment.heading}</h3>
+            <span>{(todo.attachments ?? []).length}</span>
+          </div>
+        </div>
+        <AttachmentUploader upload={onAddAttachment} disabled={false} />
+        <AttachmentList
+          attachments={todo.attachments ?? []}
+          resolver={attachmentUrl}
+          onDelete={(attachment) => void removeAttachment(attachment)}
+        />
+        {attachmentError && (
+          <p className="form-error" role="alert">
+            <AlertCircle size={17} />
+            {attachmentError}
+          </p>
+        )}
+      </section>
       <section className="chat" aria-labelledby="notes-heading">
         <div className="chat-heading">
           <h3 id="notes-heading">{messages.activity.heading}</h3>
@@ -1390,8 +1477,41 @@ export function TodoDetail({
             users={users}
             meId={meId}
             revealingIds={sentIds}
+            attachmentResolver={attachmentUrl}
           />
-          <form className="chat-composer" onSubmit={post}>
+          <form
+            className={
+              "chat-composer" + (composerDragging ? " composer-dragging" : "")
+            }
+            onDragOver={(event) => {
+              event.preventDefault();
+              setComposerDragging(true);
+            }}
+            onDragLeave={() => setComposerDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setComposerDragging(false);
+              pickComposer([...event.dataTransfer.files]);
+            }}
+            onSubmit={post}
+          >
+            {picked.length > 0 && (
+              <div className="composer-attachments">
+                {picked.map((pickedItem) => (
+                  <AttachmentPreview
+                    key={pickedItem.id}
+                    file={pickedItem.file}
+                    onRemove={() =>
+                      setPicked((current) =>
+                        current.filter(
+                          (candidate) => candidate.id !== pickedItem.id,
+                        ),
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            )}
             <label htmlFor="new-note" className="sr-only">
               {messages.chat.input}
             </label>
@@ -1400,6 +1520,13 @@ export function TodoDetail({
               id="new-note"
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onPaste={(e) => {
+                const files = [...(e.clipboardData?.files ?? [])];
+                if (files.length) {
+                  e.preventDefault();
+                  pickComposer(files);
+                }
+              }}
               placeholder={messages.chat.input}
               maxLength={2000}
               rows={2}
@@ -1415,13 +1542,33 @@ export function TodoDetail({
               }}
             />
             <div className="composer-actions">
+              <input
+                ref={composeInputRef}
+                type="file"
+                multiple
+                className="sr-only"
+                aria-label={messages.attachment.memoAttachLabel}
+                onChange={(e) => {
+                  pickComposer([...(e.target.files ?? [])]);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="icon-button composer-attach"
+                aria-label={messages.attachment.memoAttachLabel}
+                title={messages.attachment.memoAttachLabel}
+                onClick={() => composeInputRef.current?.click()}
+              >
+                <Paperclip size={18} />
+              </button>
               <span className="char-count">
                 {messages.common.characters(text.length, 2000)}
               </span>
               <button
                 type="submit"
                 className="send-button"
-                disabled={!text.trim()}
+                disabled={!text.trim() && picked.length === 0}
                 aria-label={messages.chat.send}
                 title={messages.chat.sendShortcut}
                 onClick={() => composer.current?.blur()}

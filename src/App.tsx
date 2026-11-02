@@ -737,6 +737,37 @@ export default function App() {
               updateTodo(selected.id, patch, message)
             }
             onMemo={(body) => addMemo(selected.id, body)}
+            onMemoWithFiles={(body, files) =>
+              board.addMemoWithFiles(selected.id, body, files)
+            }
+            attachmentUrl={(attachmentId) => board.attachmentUrl(attachmentId)}
+            onAddAttachment={async (file) => {
+              try {
+                await board.addTodoAttachment(selected.id, file);
+                return true;
+              } catch (error) {
+                setActionError(
+                  error instanceof Error && error.message
+                    ? error.message
+                    : messages.errors.api.general,
+                );
+                return false;
+              }
+            }}
+            onRemoveAttachment={async (attachmentId) => {
+              try {
+                await board.removeAttachment(attachmentId);
+                setToast({ message: messages.attachment.deleted });
+                return true;
+              } catch (error) {
+                setActionError(
+                  error instanceof Error && error.message
+                    ? error.message
+                    : messages.attachment.deleteFailed,
+                );
+                return false;
+              }
+            }}
             onSubtaskAdd={(draft) => addSubtask(selected.id, draft)}
             onSubtaskUpdate={(subtaskId, patch, message) =>
               updateSubtask(selected.id, subtaskId, patch, message)

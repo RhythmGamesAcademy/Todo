@@ -14,7 +14,7 @@ export interface ActivityChange {
 
 export class ApiException extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 500,
+    readonly status: 400 | 404 | 409 | 413 | 502 | 500,
     message: string,
   ) {
     super(message);

@@ -4,6 +4,7 @@ import { dateText } from "../model";
 import type { Note } from "../model";
 import type { Activity, CloudUser } from "../cloud/types";
 import { messages } from "../messages";
+import { NoteAttachments } from "../components/AttachmentList";
 
 export interface TimelineProps {
   /** このTODOの activity だけを絞って渡す */
@@ -15,6 +16,8 @@ export interface TimelineProps {
   meId: string | null;
   /** 送信直後のメモだけ点から本文へ演出する */
   revealingIds?: ReadonlySet<string>;
+  /** メモ添付の署名付きURLを取得する(Discord CDN用)。添付が無ければ不要。 */
+  attachmentResolver?: (attachmentId: string) => Promise<string>;
 }
 
 type Entry =
@@ -72,10 +75,12 @@ function ChatMessage({
   note,
   enter,
   author,
+  resolver,
 }: {
   note: Note;
   enter: boolean;
   author: string;
+  resolver?: (attachmentId: string) => Promise<string>;
 }) {
   const [pending, setPending] = useState(enter);
   const row = useRef<HTMLLIElement>(null);
@@ -162,6 +167,12 @@ function ChatMessage({
           <div className="message-reveal" aria-hidden={pending || undefined}>
             <div>
               <p className="message-text">{note.text}</p>
+              {note.attachments && note.attachments.length > 0 && resolver && (
+                <NoteAttachments
+                  attachments={note.attachments}
+                  resolver={resolver}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -176,6 +187,7 @@ export function Timeline({
   users,
   meId,
   revealingIds,
+  attachmentResolver,
 }: TimelineProps) {
   const thread = useRef<HTMLOListElement>(null);
   const names = useMemo(
@@ -220,6 +232,7 @@ export function Timeline({
             note={entry.note}
             author={authorName(entry.note)}
             enter={!!revealingIds?.has(entry.id)}
+            resolver={attachmentResolver}
           />
         ) : (
           <li key={"activity-" + entry.id} className="timeline-activity">

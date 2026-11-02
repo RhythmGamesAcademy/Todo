@@ -30,6 +30,16 @@ const withCaller = (
     : body;
 };
 
+// multipart の userId も JSON と同じ扱いで付ける(セッションが一致するときだけ)。
+const formWithCaller = (token: string, form: FormData): FormData => {
+  const withUser = new FormData();
+  for (const [key, value] of form.entries()) withUser.append(key, value);
+  const session = readSession();
+  if (session && session.token === token)
+    withUser.append("userId", session.userId);
+  return withUser;
+};
+
 const jsonInit = (
   method: string,
   body: Record<string, unknown>,
@@ -290,6 +300,98 @@ export async function renameUser(
 export async function removeUser(token: string, id: string): Promise<void> {
   await apiFetch<void>(
     listPath(token) + "/users/" + encodeURIComponent(id),
+    jsonInit("DELETE", withCaller(token, {})),
+  );
+}
+
+// ---- 添付ファイル(Discord CDN保存) --------------------------------
+
+const postForm = (method: string, form: FormData): RequestInit => ({
+  method,
+  body: form,
+});
+
+/** TODO単位のファイル添付。1リクエストにつき1ファイル(逐次アップロード)。 */
+export async function uploadTodoAttachment(
+  token: string,
+  todoId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  await apiFetch<{ revision: number }>(
+    listPath(token) + "/todos/" + encodeURIComponent(todoId) + "/attachments",
+    postForm("POST", formWithCaller(token, form)),
+  );
+}
+
+/** 作成済みメモへの追加ファイル。 */
+export async function uploadMemoAttachment(
+  token: string,
+  todoId: string,
+  memoId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  await apiFetch<{ revision: number }>(
+    listPath(token) +
+      "/todos/" +
+      encodeURIComponent(todoId) +
+      "/memos/" +
+      encodeURIComponent(memoId) +
+      "/attachments",
+    postForm("POST", formWithCaller(token, form)),
+  );
+}
+
+/** 本文と最初のファイルを同時に投稿するメモ作成。fileは必須。 */
+export async function sendMemoWithAttachment(
+  token: string,
+  todoId: string,
+  body: string,
+  file: File,
+): Promise<{ id: string }> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  if (body.trim()) form.append("body", body.trim());
+  const data = await apiFetch<{ id: string }>(
+    listPath(token) +
+      "/todos/" +
+      encodeURIComponent(todoId) +
+      "/memos/with-attachment",
+    postForm("POST", formWithCaller(token, form)),
+  );
+  if (!data?.id) throw new ApiError(500, "invalid memo create response");
+  return { id: data.id };
+}
+
+/** Discord 署名付きURLの再取得。URLは永続保存しないため、必要時に引き直す。 */
+export async function fetchAttachmentUrl(
+  token: string,
+  attachmentId: string,
+): Promise<{ url: string; filename: string; contentType: string }> {
+  const data = await apiFetch<{
+    url: string;
+    filename: string;
+    contentType: string;
+  }>(
+    listPath(token) +
+      "/attachments/" +
+      encodeURIComponent(attachmentId) +
+      "/url",
+  );
+  if (!data || !data.url) throw new ApiError(500, "invalid url response");
+  return data;
+}
+
+/** 添付ファイルの削除。失敗したら行が残るため再試行できる。 */
+export async function deleteAttachment(
+  token: string,
+  attachmentId: string,
+): Promise<void> {
+  await apiFetch<{ revision: number }>(
+    listPath(token) + "/attachments/" + encodeURIComponent(attachmentId),
     jsonInit("DELETE", withCaller(token, {})),
   );
 }

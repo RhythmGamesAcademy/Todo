@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type {
+  Attachment,
   Note,
   Priority,
   Status,
@@ -31,13 +32,26 @@ import {
   sameIds,
   toPgTextArray,
 } from "./domain.js";
+import {
+  AttachmentValidationError,
+  MAX_ATTACHMENTS_PER_TODO,
+  verifyAttachment,
+} from "./attachment.js";
+import type { DiscordClient } from "./discord.js";
 import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
 
 export interface AppDeps {
   sql: Sql;
   transact: Transact;
   describe?: () => Promise<DbInfo>;
+  /** Discord CDN への保存クライアント。未設定のときは添付 API が 500 になる。 */
+  discord?: DiscordClient;
 }
+
+export const wrongDiscordSetup = new ApiException(
+  500,
+  "discord storage is not configured",
+);
 
 interface ListRow {
   id: string;
@@ -120,6 +134,26 @@ interface SubtaskMemoRow {
   body: string;
   created_at: unknown;
 }
+
+interface AttachmentRow {
+  id: string;
+  todo_id: string;
+  memo_id: string | null;
+  filename: string;
+  content_type: string;
+  size_bytes: string | number;
+  created_by: string | null;
+  created_at: unknown;
+}
+
+const toCloudAttachment = (row: AttachmentRow): Attachment => ({
+  id: row.id,
+  filename: row.filename,
+  contentType: row.content_type,
+  sizeBytes: Number(row.size_bytes),
+  createdAt: toIso(row.created_at),
+  createdBy: row.created_by,
+});
 
 interface ActivityRow {
   id: string;
@@ -260,7 +294,7 @@ async function readOptionalJson(c: Context): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>;
 }
 
-export function createApp({ sql, transact, describe }: AppDeps): Hono {
+export function createApp({ sql, transact, describe, discord }: AppDeps): Hono {
   const app = new Hono();
 
   const findList = async (token: string): Promise<ListRow | null> => {
@@ -367,6 +401,183 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     return subtask ?? null;
   };
 
+  // ---- 添付ファイル(Discord CDN) -------------------------------------
+  // データベースには Discord の識別情報とメタデータだけを保存し、
+  // ファイル本体は常に Discord 側に置く。
+
+  const requireDiscord = (): DiscordClient => {
+    if (!discord) throw wrongDiscordSetup;
+    return discord;
+  };
+
+  // 不正な multipart 本文は 400 に寄せる。
+  const readFormData = async (c: Context): Promise<FormData> => {
+    try {
+      return await c.req.formData();
+    } catch {
+      throw new ApiException(400, "invalid multipart body");
+    }
+  };
+
+  const optionalUserIdFromForm = async (
+    form: FormData,
+    listId: string,
+  ): Promise<string | null> => {
+    const value = form.get("userId");
+    if (value === null || value === "") return null;
+    const id = parseUserId(value, "userId");
+    await requireUser(listId, id);
+    return id;
+  };
+
+  /** form の file フィールドを検証して既知形式に正規化する。 */
+  const extractVerifiedFile = async (
+    form: FormData,
+  ): Promise<{
+    filename: string;
+    contentType: string;
+    file: Blob;
+    category: string;
+  }> => {
+    const value = form.get("file");
+    if (!(value instanceof File))
+      throw new ApiException(400, "file field is required");
+    const verified = await verifyAttachment(value.name, value.type, value);
+    return { ...verified, file: value };
+  };
+
+  // 検証エラーと API エラーの対応。容量超過だけは 413 で伝える。
+  const toApiError = (error: unknown): ApiException => {
+    if (!(error instanceof AttachmentValidationError)) throw error;
+    if (error.code === "no-file")
+      return new ApiException(400, "file field is required");
+    if (error.code === "too-large")
+      return new ApiException(413, "file size exceeds the 3MiB limit");
+    return new ApiException(400, `invalid file: ${error.code}`);
+  };
+
+  /** TODO単位とメモ単位を合わせた添付数の上限確認。 */
+  const assertAttachmentLimit = async (todoId: string): Promise<void> => {
+    const [row] = rowsOf<{ count: number }>(
+      await sql`SELECT count(*)::int AS count FROM public.attachments WHERE todo_id = ${todoId}`,
+    );
+    if ((row?.count ?? 0) >= MAX_ATTACHMENTS_PER_TODO)
+      throw new ApiException(400, "attachment limit reached");
+  };
+
+  /**
+   * Discord への投稿と Neon への登録。
+   * Neon の登録だけが失敗したファイルはDiscordからも消す(孤立ファイル防止)。
+   */
+  const uploadAndRegister = async (params: {
+    todoId: string;
+    memoId: string | null;
+    userId: string | null;
+    filename: string;
+    contentType: string;
+    file: Blob;
+  }): Promise<void> => {
+    await assertAttachmentLimit(params.todoId);
+    const upload = await requireDiscord().uploadMessage(params);
+    try {
+      await transact([
+        insertAttachment({
+          todoId: params.todoId,
+          memoId: params.memoId,
+          userId: params.userId,
+          filename: params.filename,
+          contentType: params.contentType,
+          sizeBytes: params.file.size,
+          upload,
+        }),
+      ]);
+    } catch (error) {
+      // Neon登録に失敗したファイルはDiscordにも残さない(孤立ファイル防止)。
+      await requireDiscord()
+        .deleteMessage(upload.messageId)
+        .catch(() => {});
+      throw error;
+    }
+  };
+
+  const insertAttachment = (params: {
+    todoId: string;
+    memoId: string | null;
+    userId: string | null;
+    filename: string;
+    contentType: string;
+    sizeBytes: number;
+    upload: { messageId: string; attachmentId: string; channelId: string };
+  }): SqlCall =>
+    sql`
+      INSERT INTO public.attachments (
+        id, todo_id, memo_id,
+        discord_channel_id, discord_message_id, discord_attachment_id,
+        filename, content_type, size_bytes, created_by, created_at
+      )
+      VALUES (
+        ${randomUUID()}, ${params.todoId}, ${params.memoId},
+        ${params.upload.channelId}, ${params.upload.messageId}, ${params.upload.attachmentId},
+        ${params.filename}, ${params.contentType}, ${params.sizeBytes},
+        ${params.userId}, clock_timestamp()
+      )
+    `;
+
+  const findAttachedTodo = async (
+    listId: string,
+    todoId: string,
+  ): Promise<TodoRecordRow | null> => {
+    const todo = await findTodo(listId, todoId);
+    if (!todo || todo.deleted_at !== null) return null;
+    return todo;
+  };
+
+  const findMemo = async (
+    todoId: string,
+    id: string,
+  ): Promise<MemoRow | null> => {
+    if (!UUID.test(id)) return null;
+    const [memo] = rowsOf<MemoRow>(
+      await sql`SELECT id, todo_id, user_id, body, created_at FROM public.memos WHERE id = ${id} AND todo_id = ${todoId}`,
+    );
+    return memo ?? null;
+  };
+
+  const findAttachment = async (
+    listId: string,
+    id: string,
+  ): Promise<
+    | null
+    | (Pick<
+        AttachmentRow,
+        "id" | "filename" | "content_type" | "created_at"
+      > & {
+        discord_message_id: string;
+        discord_attachment_id: string;
+        todoId: string;
+      })
+  > => {
+    if (!UUID.test(id)) return null;
+    const [row] = rowsOf<{
+      id: string;
+      filename: string;
+      content_type: string;
+      created_at: unknown;
+      discord_message_id: string;
+      discord_attachment_id: string;
+      todoId: string;
+    }>(
+      await sql`
+        SELECT a.id, a.filename, a.content_type, a.created_at,
+               a.discord_message_id, a.discord_attachment_id, t.id AS "todoId"
+        FROM public.attachments a
+        JOIN public.todos t ON t.id = a.todo_id
+        WHERE a.id = ${id} AND t.list_id = ${listId}
+      `,
+    );
+    return row ?? null;
+  };
+
   const addActivity = (
     listId: string,
     todoId: string | null,
@@ -454,6 +665,33 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
   app.delete("/api/lists/:token", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
+    // TODO削除は復元に備えてDiscordのファイルを残すが、リストの完全削除では
+    // 関連メッセージを先に消して孤立ファイルを防ぐ。削除に失敗したら行を残した
+    // まま502で返し、再試行で続きから消せる(順次消えたものは404=成功扱い)。
+    const messages = rowsOf<{ discord_message_id: string }>(
+      await sql`
+        SELECT a.discord_message_id FROM public.attachments a
+        JOIN public.todos t ON t.id = a.todo_id
+        WHERE t.list_id = ${list.id}
+        GROUP BY a.discord_message_id
+      `,
+    );
+    if (messages.length > 0 && discord) {
+      const remnants: string[] = [];
+      for (const { discord_message_id: messageId } of messages) {
+        try {
+          await discord.deleteMessage(messageId);
+        } catch (error) {
+          console.error(error);
+          remnants.push(messageId);
+        }
+      }
+      if (remnants.length > 0)
+        throw new ApiException(
+          502,
+          "failed to delete files on Discord; retry list deletion",
+        );
+    }
     // 子テーブルは FK の ON DELETE CASCADE で物理削除される。
     // 確認 UI はクライアント側の責務なので、ここでは即時削除する。
     await sql`DELETE FROM public.lists WHERE id = ${list.id}`;
@@ -906,6 +1144,179 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
     return c.json({ id }, 201);
   });
 
+  // ---- 添付系エンドポイント ------------------------------------------
+  // 1リクエストにつき1ファイル。複数ファイルはフロントエンドが逐次送る。
+
+  /** TODO単位のファイル添付。 */
+  app.post("/api/lists/:token/todos/:todoId/attachments", async (c) => {
+    try {
+      const list = await findList(c.req.param("token"));
+      if (!list) return notFound(c);
+      const todo = await findAttachedTodo(list.id, c.req.param("todoId"));
+      if (!todo) return notFound(c);
+      const form = await readFormData(c);
+      const userId = await optionalUserIdFromForm(form, list.id);
+      const verified = await extractVerifiedFile(form);
+      await uploadAndRegister({
+        todoId: todo.id,
+        memoId: null,
+        userId,
+        filename: verified.filename,
+        contentType: verified.contentType,
+        file: verified.file,
+      });
+      return c.json(
+        {
+          attachment: {
+            filename: verified.filename,
+            contentType: verified.contentType,
+          },
+          revision: await readRevision(list.id),
+        },
+        201,
+      );
+    } catch (error) {
+      throw toApiError(error);
+    }
+  });
+
+  /** 本文と最初のファイルをまとめて受け取るメモ作成。 */
+  app.post(
+    "/api/lists/:token/todos/:todoId/memos/with-attachment",
+    async (c) => {
+      try {
+        const list = await findList(c.req.param("token"));
+        if (!list) return notFound(c);
+        const todo = await findAttachedTodo(list.id, c.req.param("todoId"));
+        if (!todo) return notFound(c);
+        const form = await readFormData(c);
+        const userId = await optionalUserIdFromForm(form, list.id);
+        const bodyValue = form.get("body");
+        if (bodyValue !== null && typeof bodyValue !== "string")
+          throw new ApiException(400, "body must be a string");
+        const text = typeof bodyValue === "string" ? bodyValue.trim() : "";
+        if (text.length > 2000)
+          throw new ApiException(400, "body must be at most 2000 characters");
+        const verified = await extractVerifiedFile(form);
+        const memoId = randomUUID();
+        await assertAttachmentLimit(todo.id);
+        const upload = await requireDiscord().uploadMessage(verified);
+        // 送信者以外のメンバーを候補に、本文中の @<名前>(完全一致)をメンションとする。
+        const mentionCandidates = rowsOf<{ id: string; name: string }>(
+          userId === null
+            ? await sql`SELECT id, name FROM public.users WHERE list_id = ${list.id}`
+            : await sql`SELECT id, name FROM public.users WHERE list_id = ${list.id} AND id <> ${userId}`,
+        );
+        const mentioned = text ? extractMentions(text, mentionCandidates) : [];
+        try {
+          await transact([
+            sql`
+              INSERT INTO public.memos (id, todo_id, user_id, body)
+              VALUES (${memoId}, ${todo.id}, ${userId}, ${text})
+            `,
+            insertAttachment({
+              todoId: todo.id,
+              memoId,
+              userId,
+              filename: verified.filename,
+              contentType: verified.contentType,
+              sizeBytes: verified.file.size,
+              upload,
+            }),
+            ...mentioned.map((mentionedId) =>
+              addNotification(
+                list.id,
+                todo.id,
+                mentionedId,
+                userId,
+                "mention",
+                text,
+              ),
+            ),
+          ]);
+        } catch (error) {
+          // メモ・添付の登録に失敗したファイルはDiscordにも残さない。
+          await requireDiscord()
+            .deleteMessage(upload.messageId)
+            .catch(() => {});
+          throw error;
+        }
+        return c.json(
+          { id: memoId, revision: await readRevision(list.id) },
+          201,
+        );
+      } catch (error) {
+        throw toApiError(error);
+      }
+    },
+  );
+
+  /** 作成済みメモへの追加ファイル。 */
+  app.post(
+    "/api/lists/:token/todos/:todoId/memos/:memoId/attachments",
+    async (c) => {
+      try {
+        const list = await findList(c.req.param("token"));
+        if (!list) return notFound(c);
+        const todo = await findAttachedTodo(list.id, c.req.param("todoId"));
+        if (!todo) return notFound(c);
+        const memo = await findMemo(todo.id, c.req.param("memoId"));
+        if (!memo) return notFound(c);
+        const form = await readFormData(c);
+        const userId = await optionalUserIdFromForm(form, list.id);
+        const verified = await extractVerifiedFile(form);
+        await uploadAndRegister({
+          todoId: todo.id,
+          memoId: memo.id,
+          userId,
+          filename: verified.filename,
+          contentType: verified.contentType,
+          file: verified.file,
+        });
+        return c.json({ revision: await readRevision(list.id) }, 201);
+      } catch (error) {
+        throw toApiError(error);
+      }
+    },
+  );
+
+  /** Discord の署名付きURLの再取得。URLは永続保存しないため、必要時に引き直す。 */
+  app.get("/api/lists/:token/attachments/:id/url", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findAttachment(list.id, c.req.param("id"));
+    if (!row) return notFound(c);
+    const message = await requireDiscord().fetchMessage(row.discord_message_id);
+    if (!message)
+      throw new ApiException(404, "discord message no longer exists");
+    const target = message.attachments.find(
+      (attachment) => attachment.id === row.discord_attachment_id,
+    );
+    if (!target) throw new ApiException(404, "attachment no longer exists");
+    return c.json({
+      url: target.url,
+      filename: row.filename,
+      contentType: row.content_type,
+    });
+  });
+
+  /** 添付ファイルの削除。Discord側で失敗したら行を残して再試行できる。 */
+  app.delete("/api/lists/:token/attachments/:id", async (c) => {
+    const list = await findList(c.req.param("token"));
+    if (!list) return notFound(c);
+    const row = await findAttachment(list.id, c.req.param("id"));
+    if (!row) return notFound(c);
+    try {
+      await requireDiscord().deleteMessage(row.discord_message_id);
+    } catch (error) {
+      // Discord の削除に失敗しても Neon の行情報は消さず、後で再試行する。
+      console.error(error);
+      throw new ApiException(502, "failed to delete the file on Discord");
+    }
+    await sql`DELETE FROM public.attachments WHERE id = ${row.id}`;
+    return c.json({ revision: await readRevision(list.id) });
+  });
+
   app.post("/api/lists/:token/todos/:todoId/subtasks", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
@@ -1058,6 +1469,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       memosResult,
       subtasksResult,
       subtaskMemosResult,
+      attachmentsResult,
       activitiesResult,
       notificationsResult,
     ] = await Promise.all([
@@ -1067,6 +1479,12 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
       // 親TODOのソフト削除中は、復元までサブタスクも取得結果から隠す。
       sql`SELECT s.id, s.todo_id, s.title, s.status, s.priority, s.due, s.created_at, s.updated_at FROM public.subtasks s JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY s.created_at, s.id`,
       sql`SELECT m.id, m.subtask_id, m.body, m.created_at FROM public.subtask_memos m JOIN public.subtasks s ON s.id = m.subtask_id JOIN public.todos t ON t.id = s.todo_id WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL ORDER BY m.created_at, m.id`,
+      // TODO・メモの添付情報は署名付きURLに到らない識別情報だけを返す。
+      sql`SELECT a.id, a.todo_id, a.memo_id, a.filename, a.content_type, a.size_bytes, a.created_by, a.created_at
+          FROM public.attachments a
+          JOIN public.todos t ON t.id = a.todo_id
+          WHERE t.list_id = ${list.id} AND t.deleted_at IS NULL
+          ORDER BY a.created_at, a.id`,
       // 最新順に取得して上位 ACTIVITY_LIMIT 件に絞り、応答では時系列(昇順)に戻す。
       sql`SELECT id, todo_id, user_id, kind, field, before, after, created_at FROM public.activities WHERE list_id = ${list.id} ORDER BY created_at DESC, id DESC LIMIT ${ACTIVITY_LIMIT}`,
       // 通知は自分宛だけ。userId 未指定のときは NULL との比較で該当ゼロになる。
@@ -1077,6 +1495,21 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
           LIMIT ${NOTIFICATION_LIMIT}`,
     ]);
 
+    // 添付情報はTODO単位とメモ単位に分けて集める。
+    const attachmentsByTodo = new Map<string, Attachment[]>();
+    const attachmentsByMemo = new Map<string, Attachment[]>();
+    for (const row of rowsOf<AttachmentRow>(attachmentsResult)) {
+      const attachment = toCloudAttachment(row);
+      const attended = attachmentsByTodo.get(row.todo_id);
+      if (attended) attended.push(attachment);
+      else attachmentsByTodo.set(row.todo_id, [attachment]);
+      if (row.memo_id) {
+        const noted = attachmentsByMemo.get(row.memo_id);
+        if (noted) noted.push(attachment);
+        else attachmentsByMemo.set(row.memo_id, [attachment]);
+      }
+    }
+
     const notesByTodo = new Map<string, Note[]>();
     for (const memo of rowsOf<MemoRow>(memosResult)) {
       const note: Note = {
@@ -1084,6 +1517,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
         text: memo.body,
         createdAt: toIso(memo.created_at),
         userId: memo.user_id,
+        attachments: attachmentsByMemo.get(memo.id) ?? [],
       };
       const notes = notesByTodo.get(memo.todo_id);
       if (notes) notes.push(note);
@@ -1131,6 +1565,7 @@ export function createApp({ sql, transact, describe }: AppDeps): Hono {
         ...toCloudTodo(todo),
         notes: notesByTodo.get(todo.id) ?? [],
         subtasks: subtasksByTodo.get(todo.id) ?? [],
+        attachments: attachmentsByTodo.get(todo.id) ?? [],
       })),
       activities: rowsOf<ActivityRow>(activitiesResult)
         .reverse()

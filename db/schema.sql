@@ -63,7 +63,30 @@ CREATE TABLE memos (
   todo_id    UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
   user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
   body       TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- メモ単位の添付が対象TODOに所属することを複合外部キーで保証するための
+  -- 複合UNIQUE。(id, todo_id) を新規作成用のスキーマにも反映する。
+  UNIQUE (id, todo_id)
+);
+
+-- ファイル本体はDiscord CDNに置き、NeonにはDiscord上の識別情報とメタデータ
+-- だけを保存する。Discordの署名付きURLは期限が変わるため永続保存しない。
+-- memo_id が NULL のときはTODO単位の添付、UUID のときはメモ単位の添付。
+CREATE TABLE attachments (
+  id          UUID PRIMARY KEY,
+  todo_id     UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+  memo_id     UUID,
+  discord_channel_id TEXT NOT NULL,
+  discord_message_id TEXT NOT NULL,
+  discord_attachment_id TEXT NOT NULL,
+  filename    TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size_bytes  BIGINT NOT NULL CHECK (size_bytes > 0),
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (discord_channel_id, discord_message_id),
+  -- メモが対象TODOに所属することを複合外部キーで保証する。
+  FOREIGN KEY (memo_id, todo_id) REFERENCES memos (id, todo_id) ON DELETE CASCADE
 );
 
 -- 自分宛の通知。user_id は宛先、actor_id は操作者。
@@ -112,6 +135,9 @@ CREATE TABLE activities (
 
 CREATE INDEX todos_list_id_idx ON todos (list_id);
 CREATE INDEX todos_active_idx ON todos (list_id, deleted_at);
+CREATE INDEX attachments_todo_id_idx ON attachments (todo_id);
+CREATE INDEX attachments_memo_id_idx ON attachments (memo_id);
+CREATE INDEX attachments_discord_message_id_idx ON attachments (discord_message_id);
 CREATE INDEX subtasks_todo_id_idx ON subtasks (todo_id);
 CREATE INDEX subtask_memos_subtask_id_idx ON subtask_memos (subtask_id);
 CREATE INDEX subtask_memos_created_at_idx ON subtask_memos (created_at);
@@ -150,6 +176,13 @@ BEGIN
       WHEN TG_OP = 'DELETE' THEN OLD.list_id
       ELSE NEW.list_id
     END;
+  ELSIF TG_TABLE_NAME = 'attachments' THEN
+    SELECT t.list_id INTO target_list_id
+    FROM todos t
+    WHERE t.id = CASE
+      WHEN TG_OP = 'DELETE' THEN OLD.todo_id
+      ELSE NEW.todo_id
+    END;
   ELSIF TG_OP = 'DELETE' THEN
     target_list_id := OLD.list_id;
   ELSE
@@ -181,6 +214,10 @@ FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
 
 CREATE TRIGGER users_bump_revision
 AFTER INSERT OR UPDATE OR DELETE ON users
+FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
+
+CREATE TRIGGER attachments_bump_revision
+AFTER INSERT OR UPDATE OR DELETE ON attachments
 FOR EACH ROW EXECUTE FUNCTION bump_list_revision();
 
 CREATE TRIGGER activities_bump_revision

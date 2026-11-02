@@ -52,8 +52,10 @@ const validState = (): CloudState => ({
           text: "たたき台を共有",
           createdAt: NOW,
           userId: "user-1",
+          attachments: [],
         },
       ],
+      attachments: [],
     },
   ],
   activities: [

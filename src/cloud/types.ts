@@ -1,5 +1,6 @@
 import type {
   ApprovalStatus,
+  Attachment,
   Subtask,
   SubtaskDraft,
   SubtaskMemo,
@@ -9,6 +10,7 @@ import type {
 } from "../model";
 export type {
   ApprovalStatus,
+  Attachment,
   Subtask,
   SubtaskDraft,
   SubtaskMemo,
