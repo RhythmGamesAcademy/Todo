@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/892dc094-22d2-45e4-be10-b221142fe6bd
 
 ### 添付ファイル（Neon Object Storage）
 
-TODOとメモにはファイルを添付できます。新しいファイル本体はNeonのS3互換オブジェクトストレージに保存し、DBにはオブジェクトキーとメタデータだけを保存します。閲覧時には短期署名付きURLを発行します。既存のDiscord添付は互換表示できます。
+TODOとメモにはファイルを添付できます。ファイル本体はNeonのS3互換オブジェクトストレージに保存し、DBにはオブジェクトキーとメタデータだけを保存します。閲覧時には短期署名付きURLを発行します。
 
 - 対応形式：JPG／PNG／WebP／GIF（画像）、MP4／WebM／MOV（動画）、PPTX／PDF／TXT（ファイル）。拡張子・MIME宣言・マジックナンバーのすべてを検証します
 - 1ファイル3MiBまで（Vercel Functionsの本文上限に余裕を持たせた値）、1リクエストにつき1ファイル。複数ファイルはフロントエンドが逐次アップロードし、一度に選択できるのは5件まで。1TODOあたり（TODO単位＋メモ単位の合計）最大50件
@@ -273,7 +273,7 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 - db/schema.sql: lists・users・todos・subtasks・subtask_memos・memos・attachments・activitiesのスキーマとrevision更新トリガー
 - db/migrations/001_subtasks.sql: 既存DBへサブタスク用テーブル・索引・revision更新トリガーを追加する再実行可能なマイグレーション
 - db/migrations/004_attachments.sql: 既存DBへ添付（attachments）テーブル・索引を追加する再実行可能なマイグレーション
-- vercel.json: `/api` をHonoエントリへ転送するrewrite。CSPの `img-src`／`media-src` に `cdn.discordapp.com` を含む
+- vercel.json: `/api` をHonoエントリへ転送するrewriteとCSPを設定
 - .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` / `NEON_STORAGE_*` の項目名だけの雛形
 
 ### 完了の演出

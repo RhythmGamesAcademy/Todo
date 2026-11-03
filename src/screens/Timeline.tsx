@@ -16,7 +16,7 @@ export interface TimelineProps {
   meId: string | null;
   /** 送信直後のメモだけ点から本文へ演出する */
   revealingIds?: ReadonlySet<string>;
-  /** メモ添付の署名付きURLを取得する(Discord CDN用)。添付が無ければ不要。 */
+  /** メモ添付の署名付きURLを取得する。添付が無ければ不要。 */
   attachmentResolver?: (attachmentId: string) => Promise<string>;
 }
 

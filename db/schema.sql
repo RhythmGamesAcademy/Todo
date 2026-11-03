@@ -70,22 +70,18 @@ CREATE TABLE memos (
 );
 
 -- 新規ファイル本体はNeon Object Storageに置き、DBにはオブジェクトキーと
--- メタデータだけを保存する。既存Discord添付の識別情報も互換用に保持する。
+-- メタデータだけを保存する。
 -- memo_id が NULL のときはTODO単位の添付、UUID のときはメモ単位の添付。
 CREATE TABLE attachments (
   id          UUID PRIMARY KEY,
   todo_id     UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
   memo_id     UUID,
-  object_key TEXT,
-  discord_channel_id TEXT,
-  discord_message_id TEXT,
-  discord_attachment_id TEXT,
+  object_key TEXT NOT NULL,
   filename    TEXT NOT NULL,
   content_type TEXT NOT NULL,
   size_bytes  BIGINT NOT NULL CHECK (size_bytes > 0),
   created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (discord_channel_id, discord_message_id),
   UNIQUE (object_key),
   -- メモが対象TODOに所属することを複合外部キーで保証する。
   FOREIGN KEY (memo_id, todo_id) REFERENCES memos (id, todo_id) ON DELETE CASCADE
@@ -139,7 +135,6 @@ CREATE INDEX todos_list_id_idx ON todos (list_id);
 CREATE INDEX todos_active_idx ON todos (list_id, deleted_at);
 CREATE INDEX attachments_todo_id_idx ON attachments (todo_id);
 CREATE INDEX attachments_memo_id_idx ON attachments (memo_id);
-CREATE INDEX attachments_discord_message_id_idx ON attachments (discord_message_id);
 CREATE INDEX subtasks_todo_id_idx ON subtasks (todo_id);
 CREATE INDEX subtask_memos_subtask_id_idx ON subtask_memos (subtask_id);
 CREATE INDEX subtask_memos_created_at_idx ON subtask_memos (created_at);

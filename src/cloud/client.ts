@@ -304,7 +304,7 @@ export async function removeUser(token: string, id: string): Promise<void> {
   );
 }
 
-// ---- 添付ファイル(Discord CDN保存) --------------------------------
+// ---- 添付ファイル(Object Storage保存) -------------------------------
 
 const postForm = (method: string, form: FormData): RequestInit => ({
   method,
@@ -366,7 +366,7 @@ export async function sendMemoWithAttachment(
   return { id: data.id };
 }
 
-/** Discord 署名付きURLの再取得。URLは永続保存しないため、必要時に引き直す。 */
+/** オブジェクトストレージ署名付きURLの再取得。 */
 export async function fetchAttachmentUrl(
   token: string,
   attachmentId: string,

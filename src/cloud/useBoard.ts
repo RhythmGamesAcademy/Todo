@@ -89,7 +89,7 @@ export type BoardActions = {
   ) => Promise<boolean>;
   /** 添付ファイルの削除。 */
   removeAttachment: (attachmentId: string) => Promise<void>;
-  /** Discord 署名付きURLの再取得。表示のときだけ必要に応じて呼ぶ。 */
+  /** オブジェクトストレージ署名付きURLの再取得。表示時だけ呼ぶ。 */
   attachmentUrl: (attachmentId: string) => Promise<string>;
 };
 

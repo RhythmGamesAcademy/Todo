@@ -37,7 +37,6 @@ import {
   MAX_ATTACHMENTS_PER_TODO,
   verifyAttachment,
 } from "./attachment.js";
-import type { DiscordClient } from "./discord.js";
 import type { ObjectStorage } from "./object-storage.js";
 import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
 
@@ -45,15 +44,14 @@ export interface AppDeps {
   sql: Sql;
   transact: Transact;
   describe?: () => Promise<DbInfo>;
-  /** 既存Discord添付の互換クライアント。 */
-  discord?: DiscordClient;
-  /** Neon S3互換オブジェクトストレージ。新規添付はこちらを優先する。 */
+  /** @deprecated Discord保存は廃止済み。互換テスト入力としてのみ許可。 */
+  discord?: unknown;
   objectStorage?: ObjectStorage;
 }
 
-export const wrongDiscordSetup = new ApiException(
+export const wrongObjectStorageSetup = new ApiException(
   500,
-  "discord storage is not configured",
+  "object storage is not configured",
 );
 
 interface ListRow {
@@ -297,13 +295,7 @@ async function readOptionalJson(c: Context): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>;
 }
 
-export function createApp({
-  sql,
-  transact,
-  describe,
-  discord,
-  objectStorage,
-}: AppDeps): Hono {
+export function createApp({ sql, transact, describe, objectStorage }: AppDeps): Hono {
   const app = new Hono();
 
   const findList = async (token: string): Promise<ListRow | null> => {
@@ -410,16 +402,10 @@ export function createApp({
     return subtask ?? null;
   };
 
-  // ---- 添付ファイル(Neon Object Storage / Discord互換) ---------------
-
-  const requireDiscord = (): DiscordClient => {
-    if (!discord) throw wrongDiscordSetup;
-    return discord;
-  };
+  // ---- 添付ファイル(Neon Object Storage) -----------------------------
 
   const requireObjectStorage = (): ObjectStorage => {
-    if (!objectStorage)
-      throw new ApiException(500, "object storage is not configured");
+    if (!objectStorage) throw wrongObjectStorageSetup;
     return objectStorage;
   };
 
@@ -490,35 +476,12 @@ export function createApp({
     await assertAttachmentLimit(params.todoId);
     const attachmentId = randomUUID();
     const objectKey = `attachments/${attachmentId}`;
-    if (objectStorage) {
-      await objectStorage.put({
-        key: objectKey,
-        contentType: params.contentType,
-        body: params.file,
-      });
-    } else {
-      const upload = await requireDiscord().uploadMessage(params);
-      try {
-        await transact([
-          insertAttachment({
-            attachmentId,
-            todoId: params.todoId,
-            memoId: params.memoId,
-            userId: params.userId,
-            filename: params.filename,
-            contentType: params.contentType,
-            sizeBytes: params.file.size,
-            upload,
-          }),
-        ]);
-      } catch (error) {
-        await requireDiscord()
-          .deleteMessage(upload.messageId)
-          .catch(() => {});
-        throw error;
-      }
-      return;
-    }
+    const storage = requireObjectStorage();
+    await storage.put({
+      key: objectKey,
+      contentType: params.contentType,
+      body: params.file,
+    });
     try {
       await transact([
         insertAttachment({
@@ -533,7 +496,7 @@ export function createApp({
         }),
       ]);
     } catch (error) {
-      await objectStorage.delete(objectKey).catch(() => {});
+      await storage.delete(objectKey).catch(() => {});
       throw error;
     }
   };
@@ -547,18 +510,16 @@ export function createApp({
     sizeBytes: number;
     attachmentId: string;
     objectKey?: string;
-    upload?: { messageId: string; attachmentId: string; channelId: string };
   }): SqlCall =>
     sql`
       INSERT INTO public.attachments (
         id, todo_id, memo_id,
-        object_key, discord_channel_id, discord_message_id, discord_attachment_id,
+        object_key,
         filename, content_type, size_bytes, created_by, created_at
       )
       VALUES (
         ${params.attachmentId}, ${params.todoId}, ${params.memoId},
-        ${params.objectKey ?? null},
-        ${params.upload?.channelId ?? null}, ${params.upload?.messageId ?? null}, ${params.upload?.attachmentId ?? null},
+        ${params.objectKey},
         ${params.filename}, ${params.contentType}, ${params.sizeBytes},
         ${params.userId}, clock_timestamp()
       )
@@ -593,9 +554,7 @@ export function createApp({
         AttachmentRow,
         "id" | "filename" | "content_type" | "created_at"
       > & {
-        object_key: string | null;
-        discord_message_id: string | null;
-        discord_attachment_id: string | null;
+        object_key: string;
         todoId: string;
       })
   > => {
@@ -605,14 +564,12 @@ export function createApp({
       filename: string;
       content_type: string;
       created_at: unknown;
-      object_key: string | null;
-      discord_message_id: string | null;
-      discord_attachment_id: string | null;
+      object_key: string;
       todoId: string;
     }>(
       await sql`
         SELECT a.id, a.filename, a.content_type, a.created_at,
-               a.object_key, a.discord_message_id, a.discord_attachment_id, t.id AS "todoId"
+               a.object_key, t.id AS "todoId"
         FROM public.attachments a
         JOIN public.todos t ON t.id = a.todo_id
         WHERE a.id = ${id} AND t.list_id = ${listId}
@@ -708,32 +665,25 @@ export function createApp({
   app.delete("/api/lists/:token", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
-    // TODO削除は復元に備えてDiscordのファイルを残すが、リストの完全削除では
-    // 関連メッセージを先に消して孤立ファイルを防ぐ。削除に失敗したら行を残した
-    // まま502で返し、再試行で続きから消せる(順次消えたものは404=成功扱い)。
     const storedObjects = rowsOf<{
-      object_key: string | null;
-      discord_message_id: string | null;
+      object_key: string;
     }>(
       await sql`
-        SELECT a.object_key, a.discord_message_id FROM public.attachments a
+        SELECT a.object_key FROM public.attachments a
         JOIN public.todos t ON t.id = a.todo_id
         WHERE t.list_id = ${list.id}
-        GROUP BY a.object_key, a.discord_message_id
+        GROUP BY a.object_key
       `,
     );
     if (storedObjects.length > 0) {
       const remnants: string[] = [];
       for (const object of storedObjects) {
         try {
-          if (object.object_key)
-            await requireObjectStorage().delete(object.object_key);
-          else if (object.discord_message_id)
-            await requireDiscord().deleteMessage(object.discord_message_id);
+          await requireObjectStorage().delete(object.object_key);
         } catch (error) {
           console.error(error);
           remnants.push(
-            object.object_key ?? object.discord_message_id ?? "unknown",
+            object.object_key,
           );
         }
       }
@@ -1260,15 +1210,12 @@ export function createApp({
             : await sql`SELECT id, name FROM public.users WHERE list_id = ${list.id} AND id <> ${userId}`,
         );
         const mentioned = text ? extractMentions(text, mentionCandidates) : [];
-        const upload = objectStorage
-          ? null
-          : await requireDiscord().uploadMessage(verified);
-        if (objectStorage)
-          await objectStorage.put({
-            key: objectKey,
-            contentType: verified.contentType,
-            body: verified.file,
-          });
+        const storage = requireObjectStorage();
+        await storage.put({
+          key: objectKey,
+          contentType: verified.contentType,
+          body: verified.file,
+        });
         try {
           await transact([
             sql`
@@ -1283,8 +1230,7 @@ export function createApp({
               filename: verified.filename,
               contentType: verified.contentType,
               sizeBytes: verified.file.size,
-              objectKey: objectStorage ? objectKey : undefined,
-              upload: upload ?? undefined,
+              objectKey,
             }),
             ...mentioned.map((mentionedId) =>
               addNotification(
@@ -1298,13 +1244,7 @@ export function createApp({
             ),
           ]);
         } catch (error) {
-          // メモ・添付の登録に失敗したファイルはDiscordにも残さない。
-          if (objectStorage)
-            await objectStorage.delete(objectKey).catch(() => {});
-          else if (upload)
-            await requireDiscord()
-              .deleteMessage(upload.messageId)
-              .catch(() => {});
+          await storage.delete(objectKey).catch(() => {});
           throw error;
         }
         return c.json(
@@ -1346,56 +1286,33 @@ export function createApp({
     },
   );
 
-  /** Discord の署名付きURLの再取得。URLは永続保存しないため、必要時に引き直す。 */
+  /** オブジェクトストレージの署名付きURLを再取得する。 */
   app.get("/api/lists/:token/attachments/:id/url", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
     const row = await findAttachment(list.id, c.req.param("id"));
     if (!row) return notFound(c);
-    if (row.object_key) {
-      const url = await requireObjectStorage().signedUrl({
-        key: row.object_key,
-        contentType: row.content_type,
-      });
-      return c.json({
-        url,
-        filename: row.filename,
-        contentType: row.content_type,
-      });
-    }
-    if (!row.discord_message_id || !row.discord_attachment_id)
-      throw new ApiException(500, "attachment storage metadata is incomplete");
-    const message = await requireDiscord().fetchMessage(row.discord_message_id);
-    if (!message)
-      throw new ApiException(404, "discord message no longer exists");
-    const target = message.attachments.find(
-      (attachment) => attachment.id === row.discord_attachment_id,
-    );
-    if (!target) throw new ApiException(404, "attachment no longer exists");
+    const url = await requireObjectStorage().signedUrl({
+      key: row.object_key,
+      contentType: row.content_type,
+    });
     return c.json({
-      url: target.url,
+      url,
       filename: row.filename,
       contentType: row.content_type,
     });
   });
 
-  /** 添付ファイルの削除。Discord側で失敗したら行を残して再試行できる。 */
+  /** 添付ファイルの削除。失敗したら行を残して再試行できる。 */
   app.delete("/api/lists/:token/attachments/:id", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
     const row = await findAttachment(list.id, c.req.param("id"));
     if (!row) return notFound(c);
     try {
-      if (row.object_key) await requireObjectStorage().delete(row.object_key);
-      else if (row.discord_message_id)
-        await requireDiscord().deleteMessage(row.discord_message_id);
-      else
-        throw new ApiException(
-          500,
-          "attachment storage metadata is incomplete",
-        );
+      await requireObjectStorage().delete(row.object_key);
     } catch (error) {
-      // Discord の削除に失敗しても Neon の行情報は消さず、後で再試行する。
+      // オブジェクト削除に失敗してもNeonの行情報は消さず、後で再試行する。
       console.error(error);
       throw new ApiException(502, "failed to delete the attachment object");
     }

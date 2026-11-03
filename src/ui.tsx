@@ -1040,7 +1040,7 @@ export function TodoDetail({
   users: CloudUser[];
   meId: string | null;
   activities: Activity[];
-  /** Discord署名付きURLの再取得(表示のたびに引き直す)。 */
+  /** オブジェクトストレージ署名付きURLの再取得(表示のたびに引き直す)。 */
   attachmentUrl: (attachmentId: string) => Promise<string>;
   onAddAttachment: (file: File) => Promise<boolean>;
   onRemoveAttachment: (attachmentId: string) => Promise<boolean>;

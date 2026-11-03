@@ -5,7 +5,7 @@ import type { Attachment } from "../model";
 
 /**
  * 画像・動画以外(PPTX・PDF・テキスト等)はファイルカード。
- * Discordの署名付きURLへ直接ダウンロードできる。
+ * オブジェクトストレージの署名付きURLへ直接ダウンロードできる。
  */
 export function FileAttachment({
   attachment,

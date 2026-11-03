@@ -36,9 +36,8 @@ export interface Subtask {
   memos: SubtaskMemo[];
 }
 /**
- * 添付ファイル。ファイル本体はDiscord CDNにあり、ここには識別情報と
- * メタデータだけを持つ。署名付きURLは永続保存せず、必要なときだけAPIから
- * 取り直す。
+ * 添付ファイル本体はオブジェクトストレージにあり、ここにはメタデータだけを持つ。
+ * 署名付きURLは永続保存せず、必要なときだけAPIから取り直す。
  */
 export interface Attachment {
   id: string;
