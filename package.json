@@ -13,6 +13,8 @@
     "format": "prettier --write --ignore-unknown src src/cloud/types.ts src/cloud/parse.ts src/cloud/parse.test.ts api/src/*.ts api/index.ts api/dev.ts db/schema.sql vite.config.ts tsconfig.json package.json index.html README.md"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "@neondatabase/serverless": "^1.2.0",
     "hono": "^4.13.14",
     "lucide-react": "^1.63.0",

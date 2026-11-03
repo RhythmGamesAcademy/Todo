@@ -69,22 +69,24 @@ CREATE TABLE memos (
   UNIQUE (id, todo_id)
 );
 
--- ファイル本体はDiscord CDNに置き、NeonにはDiscord上の識別情報とメタデータ
--- だけを保存する。Discordの署名付きURLは期限が変わるため永続保存しない。
+-- 新規ファイル本体はNeon Object Storageに置き、DBにはオブジェクトキーと
+-- メタデータだけを保存する。既存Discord添付の識別情報も互換用に保持する。
 -- memo_id が NULL のときはTODO単位の添付、UUID のときはメモ単位の添付。
 CREATE TABLE attachments (
   id          UUID PRIMARY KEY,
   todo_id     UUID NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
   memo_id     UUID,
-  discord_channel_id TEXT NOT NULL,
-  discord_message_id TEXT NOT NULL,
-  discord_attachment_id TEXT NOT NULL,
+  object_key TEXT,
+  discord_channel_id TEXT,
+  discord_message_id TEXT,
+  discord_attachment_id TEXT,
   filename    TEXT NOT NULL,
   content_type TEXT NOT NULL,
   size_bytes  BIGINT NOT NULL CHECK (size_bytes > 0),
   created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (discord_channel_id, discord_message_id),
+  UNIQUE (object_key),
   -- メモが対象TODOに所属することを複合外部キーで保証する。
   FOREIGN KEY (memo_id, todo_id) REFERENCES memos (id, todo_id) ON DELETE CASCADE
 );

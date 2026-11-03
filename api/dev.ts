@@ -3,6 +3,7 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./src/app.js";
 import { makeDb } from "./src/sql.js";
+import { makeObjectStorageFromEnv } from "./src/object-storage.js";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -11,7 +12,10 @@ if (!url) {
   );
 }
 
-const app = createApp(makeDb(url));
+const app = createApp({
+  ...makeDb(url),
+  objectStorage: makeObjectStorageFromEnv() ?? undefined,
+});
 const port = 3000;
 
 serve({ fetch: app.fetch, port }, () => {

@@ -6,20 +6,23 @@
 
 https://github.com/user-attachments/assets/892dc094-22d2-45e4-be10-b221142fe6bd
 
-### 添付ファイル（Discord CDN）
+### 添付ファイル（Neon Object Storage）
 
-TODOとメモにはファイルを添付できます。ファイル本体はDiscordの専用チャンネルにBotがメッセージとして投稿し、サーバーのDBにはメッセージIDなどの識別情報だけを保存します。閲覧時には、DiscordのCDNから署名付きURLを都度引き直して表示します。
+TODOとメモにはファイルを添付できます。新しいファイル本体はNeonのS3互換オブジェクトストレージに保存し、DBにはオブジェクトキーとメタデータだけを保存します。閲覧時には短期署名付きURLを発行します。既存のDiscord添付は互換表示できます。
 
 - 対応形式：JPG／PNG／WebP／GIF（画像）、MP4／WebM／MOV（動画）、PPTX／PDF／TXT（ファイル）。拡張子・MIME宣言・マジックナンバーのすべてを検証します
 - 1ファイル3MiBまで（Vercel Functionsの本文上限に余裕を持たせた値）、1リクエストにつき1ファイル。複数ファイルはフロントエンドが逐次アップロードし、一度に選択できるのは5件まで。1TODOあたり（TODO単位＋メモ単位の合計）最大50件
 - メモ欄では本文と最初のファイルをまとめて送信でき、送信後も作成済みメモへ追加できます
 - 取り込み失敗や容量超過はタスクの保存を妨げません
 
-使うには、`.env.local` と Vercel の環境変数にDiscord Botの設定を追加します（`.env.example` の雛形を参照）。
+使うには、`.env.local` とVercelの環境変数にNeon Object Storageの設定を追加します。
 
 ```sh
-DISCORD_BOT_TOKEN=<Botのトークン>
-DISCORD_CHANNEL_ID=<添付の投稿先となる専用チャンネルID>
+NEON_STORAGE_ENDPOINT=<Neon Object StorageのS3エンドポイント>
+NEON_STORAGE_BUCKET=<バケット名>
+NEON_STORAGE_ACCESS_KEY_ID=<アクセスキー>
+NEON_STORAGE_SECRET_ACCESS_KEY=<シークレットキー>
+NEON_STORAGE_REGION=us-east-1
 ```
 
 Botには投稿先チャンネルへの「チャンネル閲覧」「メッセージを送信」「メッセージ管理（削除する場合）」の権限を与えます。トークンはクライアントへ返さず、サーバー側だけで管理します。
@@ -70,7 +73,7 @@ TODOを管理するだけでは、「どこまで進めたか」「次に何を�
 
 - 共有リストの作成と、招待URL（`#token=`）＋表示名での参加
 - TODOの作成・編集・削除と、削除直後の取り消し
-- TODO・メモへのファイル添付（画像・動画・PPTX・PDF・TXT。1ファイル3MiBまで、1TODOあたり最大50件。保存先はDiscord CDN）
+- TODO・メモへのファイル添付（画像・動画・PPTX・PDF・TXT。1ファイル3MiBまで、1TODOあたり最大50件。保存先はNeon Object Storage）
 - 期限日時（任意）、優先度（選択欄は左から低・中・高）、状態（未着手・進行中・完了）、担当者
 - 期限なしの新規作成、または期限ありから期限なしに変更する際の確認
 - カードから開く詳細モーダルと、追記専用のチャット形式メモ
@@ -265,13 +268,13 @@ React / TypeScript / Vite / Tailwind CSS / Lucide React / Vitest / Hono / Neon�
 - api/src/app.ts / app.test.ts: リスト・メンバー・TODO・メモ・履歴・添付のHTTPルート
 - api/src/domain.ts / domain.test.ts: 入力検証、トークン生成、履歴の差分計算
 - api/src/attachment.ts / attachment.test.ts: 添付ファイルの検証（拡張子・MIME・マジックナンバー・容量上限）
-- api/src/discord.ts: Discord CDNへの投稿・取得・削除（Bot Token。429の再試行を含む）
+- api/src/object-storage.ts: Neon Object Storage（S3互換）への保存・署名URL発行・削除
 - api/src/sql.ts: Neonクライアントとトランザクションのアダプター
 - db/schema.sql: lists・users・todos・subtasks・subtask_memos・memos・attachments・activitiesのスキーマとrevision更新トリガー
 - db/migrations/001_subtasks.sql: 既存DBへサブタスク用テーブル・索引・revision更新トリガーを追加する再実行可能なマイグレーション
 - db/migrations/004_attachments.sql: 既存DBへ添付（attachments）テーブル・索引を追加する再実行可能なマイグレーション
 - vercel.json: `/api` をHonoエントリへ転送するrewrite。CSPの `img-src`／`media-src` に `cdn.discordapp.com` を含む
-- .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` / `DISCORD_BOT_TOKEN` / `DISCORD_CHANNEL_ID` の項目名だけの雛形
+- .env.example: `DATABASE_URL` / `TEST_DATABASE_URL` / `NEON_STORAGE_*` の項目名だけの雛形
 
 ### 完了の演出
 
