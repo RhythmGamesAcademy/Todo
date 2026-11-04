@@ -185,6 +185,15 @@ export function useBoard(
     void reloadRef.current();
   }, []);
 
+  /** ready 状態の state だけを部分更新する(更新操作の楽観反映に使う)。 */
+  const patchReady = useCallback(
+    (fn: (state: CloudState) => CloudState) =>
+      setBoard((view) =>
+        view.phase === "ready" ? { ...view, state: fn(view.state) } : view,
+      ),
+    [],
+  );
+
   const run = useCallback(async (call: (token: string) => Promise<unknown>) => {
     const current = sessionRef.current;
     if (!current) return;
@@ -212,9 +221,26 @@ export function useBoard(
     [run],
   );
   const addMemo = useCallback(
-    (todoId: string, body: string) =>
-      run((current) => sendMemo(current, todoId, body)),
-    [run],
+    async (todoId: string, body: string) => {
+      const current = sessionRef.current;
+      if (!current) return;
+      // 送信直後に本文を画面へ交差させる。全件再取得を待つと体感が重いので、
+      // 届いたメモIDで楽観的に加え、正確な整列や通知は次のポーリングに任せる。
+      const { id } = await sendMemo(current.token, todoId, body);
+      const note = {
+        id,
+        text: body,
+        createdAt: new Date().toISOString(),
+        userId: current.userId,
+      };
+      patchReady((state) => ({
+        ...state,
+        todos: state.todos.map((todo) =>
+          todo.id === todoId ? { ...todo, notes: [...todo.notes, note] } : todo,
+        ),
+      }));
+    },
+    [patchReady],
   );
   const addSubtask = useCallback(
     (todoId: string, draft: SubtaskDraft) =>
@@ -232,9 +258,43 @@ export function useBoard(
     [run],
   );
   const addSubtaskMemo = useCallback(
-    (todoId: string, subtaskId: string, body: string) =>
-      run((current) => sendSubtaskMemo(current, todoId, subtaskId, body)),
-    [run],
+    async (todoId: string, subtaskId: string, body: string) => {
+      const current = sessionRef.current;
+      if (!current) return;
+      // メモと同じく送信直後に反映させる。
+      const { id } = await sendSubtaskMemo(
+        current.token,
+        todoId,
+        subtaskId,
+        body,
+      );
+      patchReady((state) => ({
+        ...state,
+        todos: state.todos.map((todo) =>
+          todo.id === todoId
+            ? {
+                ...todo,
+                subtasks: todo.subtasks.map((subtask) =>
+                  subtask.id === subtaskId
+                    ? {
+                        ...subtask,
+                        memos: [
+                          ...subtask.memos,
+                          {
+                            id,
+                            text: body,
+                            createdAt: new Date().toISOString(),
+                          },
+                        ],
+                      }
+                    : subtask,
+                ),
+              }
+            : todo,
+        ),
+      }));
+    },
+    [patchReady],
   );
   const renameBoard = useCallback(
     (title: string) => run((current) => renameList(current, title)),

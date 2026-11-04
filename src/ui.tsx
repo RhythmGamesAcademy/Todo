@@ -1067,11 +1067,16 @@ export function TodoDetail({
   const [picked, setPicked] = useState<PickedAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [composerDragging, setComposerDragging] = useState(false);
+  // 送信中の2回押しで本文が二重投稿されるのを防ぐ(Ctrl+Enter も同様)。
+  const [posting, setPosting] = useState(false);
   const [sentIds, setSentIds] = useState<Set<string>>(() => new Set());
   const [pendingReveals, setPendingReveals] = useState(0);
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | "new">("");
   const [subtaskFormDirty, setSubtaskFormDirty] = useState(false);
   const [subtaskMemos, setSubtaskMemos] = useState<Record<string, string>>({});
+  const [subtaskPosting, setSubtaskPosting] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const composer = useRef<HTMLTextAreaElement>(null);
   const previousNotes = useRef(todo.notes.length);
   const timelineCount = useMemo(
@@ -1126,21 +1131,27 @@ export function TodoDetail({
   };
   async function post(e?: FormEvent) {
     e?.preventDefault();
+    if (posting) return;
     const body = text.trim();
     const files = picked.map((pickedItem) => pickedItem.file);
     if (!body && files.length === 0) return;
-    // 応答の再取得でメモが届く前に印を付けておき、失敗時は取り消す。
-    const reveals = 1;
-    setPendingReveals((count) => count + reveals);
-    const saved = await (files.length > 0
-      ? onMemoWithFiles(body, files)
-      : onMemo(body));
-    if (!saved) {
-      setPendingReveals((count) => Math.max(0, count - reveals));
-      return;
+    setPosting(true);
+    try {
+      // 応答の再取得でメモが届く前に印を付けておき、失敗時は取り消す。
+      const reveals = 1;
+      setPendingReveals((count) => count + reveals);
+      const saved = await (files.length > 0
+        ? onMemoWithFiles(body, files)
+        : onMemo(body));
+      if (!saved) {
+        setPendingReveals((count) => Math.max(0, count - reveals));
+        return;
+      }
+      setText("");
+      setPicked([]);
+    } finally {
+      setPosting(false);
     }
-    setText("");
-    setPicked([]);
   }
   /** TODO単位の添付を削除する(確認付き)。 */
   async function removeAttachment(attachment: Attachment) {
@@ -1204,9 +1215,18 @@ export function TodoDetail({
   }
   async function submitSubtaskMemo(subtaskId: string) {
     const body = subtaskMemos[subtaskId]?.trim() ?? "";
-    if (!body) return;
-    if (await onSubtaskMemo(subtaskId, body))
-      setSubtaskMemos((memos) => ({ ...memos, [subtaskId]: "" }));
+    if (!body || subtaskPosting.has(subtaskId)) return;
+    setSubtaskPosting((ids) => new Set(ids).add(subtaskId));
+    try {
+      if (await onSubtaskMemo(subtaskId, body))
+        setSubtaskMemos((memos) => ({ ...memos, [subtaskId]: "" }));
+    } finally {
+      setSubtaskPosting((ids) => {
+        const next = new Set(ids);
+        next.delete(subtaskId);
+        return next;
+      });
+    }
   }
   return (
     <div className="detail-content">
@@ -1568,7 +1588,7 @@ export function TodoDetail({
               <button
                 type="submit"
                 className="send-button"
-                disabled={!text.trim() && picked.length === 0}
+                disabled={posting || (!text.trim() && picked.length === 0)}
                 aria-label={messages.chat.send}
                 title={messages.chat.sendShortcut}
                 onClick={() => composer.current?.blur()}

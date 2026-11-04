@@ -167,11 +167,13 @@ export async function sendMemo(
   token: string,
   todoId: string,
   body: string,
-): Promise<void> {
-  await apiFetch<void>(
+): Promise<{ id: string }> {
+  const data = await apiFetch<{ id: string }>(
     listPath(token) + "/todos/" + encodeURIComponent(todoId) + "/memos",
     jsonInit("POST", withCaller(token, { body })),
   );
+  if (!data) throw new ApiError(500, "invalid memo response");
+  return data;
 }
 
 export async function createSubtask(
@@ -230,8 +232,8 @@ export async function sendSubtaskMemo(
   todoId: string,
   subtaskId: string,
   body: string,
-): Promise<void> {
-  await apiFetch<void>(
+): Promise<{ id: string }> {
+  const data = await apiFetch<{ id: string }>(
     listPath(token) +
       "/todos/" +
       encodeURIComponent(todoId) +
@@ -240,6 +242,8 @@ export async function sendSubtaskMemo(
       "/memos",
     jsonInit("POST", withCaller(token, { body })),
   );
+  if (!data) throw new ApiError(500, "invalid subtask memo response");
+  return data;
 }
 
 export const addSubtaskMemo = sendSubtaskMemo;

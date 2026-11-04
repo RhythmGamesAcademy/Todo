@@ -100,6 +100,107 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("メモの楽観反映", () => {
+  /** サブタスクを持つ state。サブタスクメモのテストに使う。 */
+  const stateWithSubtask = (): CloudState => {
+    const base = makeState(3);
+    return {
+      ...base,
+      todos: base.todos.map((todo) => ({
+        ...todo,
+        subtasks: [
+          {
+            id: "subtask-1",
+            title: "資料を確認",
+            status: "todo" as const,
+            priority: "low" as const,
+            deadline: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            memos: [],
+          },
+        ],
+      })),
+    };
+  };
+
+  it("addMemo は state を取り直さず、送信直後にメモを表示へ載せる", async () => {
+    const fixture = makeState(3);
+    const mock = installFetch((url, init) => {
+      const method = init?.method ?? "GET";
+      if (String(url).endsWith("/revision")) return { body: { revision: 3 } };
+      if (method === "POST" && String(url).endsWith("/memos"))
+        return { status: 201, body: { id: "memo-1" } };
+      return { body: fixture };
+    });
+    const { result } = renderBoard();
+    await flush();
+    expect(result.current.phase).toBe("ready");
+
+    await act(async () => {
+      await result.current.addMemo("todo-1", "最初のメモ");
+    });
+
+    // 全件の state 取り直しは初回の1件だけ。メモは送信直後に画面へ出る。
+    expect(stateFetches(mock)).toBe(1);
+    expect(result.current.phase).toBe("ready");
+    if (result.current.phase !== "ready") throw new Error("not ready");
+    expect(result.current.state.todos[0].notes).toHaveLength(1);
+    expect(result.current.state.todos[0].notes[0]).toMatchObject({
+      id: "memo-1",
+      text: "最初のメモ",
+      userId: me.userId,
+    });
+  });
+
+  it("addMemo が失敗したらメモを載せない", async () => {
+    const fixture = makeState(3);
+    installFetch((url, init) => {
+      const method = init?.method ?? "GET";
+      if (String(url).endsWith("/revision")) return { body: { revision: 3 } };
+      if (method === "POST" && String(url).endsWith("/memos"))
+        throw new TypeError("network down");
+      return { body: fixture };
+    });
+    const { result } = renderBoard();
+    await flush();
+    expect(result.current.phase).toBe("ready");
+
+    await act(async () => {
+      await expect(
+        result.current.addMemo("todo-1", "届かないメモ"),
+      ).rejects.toThrow("network down");
+    });
+
+    expect(result.current.phase).toBe("ready");
+    if (result.current.phase !== "ready") throw new Error("not ready");
+    expect(result.current.state.todos[0].notes).toHaveLength(0);
+  });
+
+  it("addSubtaskMemo も送信直後にサブタスクへ載せる", async () => {
+    const fixture = stateWithSubtask();
+    installFetch((url, init) => {
+      const method = init?.method ?? "GET";
+      if (String(url).endsWith("/revision")) return { body: { revision: 3 } };
+      if (method === "POST" && String(url).endsWith("/memos"))
+        return { status: 201, body: { id: "memo-2" } };
+      return { body: fixture };
+    });
+    const { result } = renderBoard();
+    await flush();
+    expect(result.current.phase).toBe("ready");
+
+    await act(async () => {
+      await result.current.addSubtaskMemo("todo-1", "subtask-1", "追記");
+    });
+
+    if (result.current.phase !== "ready") throw new Error("not ready");
+    const subtask = result.current.state.todos[0].subtasks[0];
+    expect(subtask.memos).toHaveLength(1);
+    expect(subtask.memos[0]).toMatchObject({ id: "memo-2", text: "追記" });
+  });
+});
+
 describe("useBoard の初期化", () => {
   it("読み込み後に ready になり、全データと自分を保持する", async () => {
     const fixture = makeState(3);

@@ -453,6 +453,45 @@ describe("メモの表示演出", () => {
   });
 });
 
+describe("メモの重複送信ガード", () => {
+  it("送信中に再送信してもメモは1件だけ送る", async () => {
+    let release: ((value: boolean) => void) | undefined;
+    const addMemo = vi.fn(
+      () => new Promise<boolean>((resolve) => (release = resolve)),
+    );
+    ready([task()], { addMemo });
+    render(<App />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "授業の課題の詳細を開く" }),
+    );
+    fireEvent.change(screen.getByLabelText("メモを入力"), {
+      target: { value: "重複防止の確認" },
+    });
+    const composer = screen
+      .getByLabelText("メモを入力")
+      .closest("form") as HTMLFormElement;
+    await act(async () => {
+      fireEvent.submit(composer);
+    });
+    expect(addMemo).toHaveBeenCalledTimes(1);
+    expect(addMemo).toHaveBeenCalledWith("task", "重複防止の確認");
+
+    // 送信が終わる前に何回押しても、追加の送信は走らない。
+    await act(async () => {
+      fireEvent.submit(composer);
+      fireEvent.submit(composer);
+    });
+    expect(addMemo).toHaveBeenCalledTimes(1);
+
+    release?.(true);
+    await act(async () => {});
+    // 完了後に入力は消える。
+    expect(
+      (screen.getByLabelText("メモを入力") as HTMLTextAreaElement).value,
+    ).toBe("");
+  });
+});
+
 describe("利用者の操作", () => {
   it("サブタスクを追加・編集・完了切替・削除し、メモを追記する", async () => {
     ready([task()]);
