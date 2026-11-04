@@ -2853,6 +2853,23 @@ input[type="checkbox"] {
   border-radius: 8px;
   background: #10141c;
 }
+.attachment-text-preview {
+  width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f6f8fb;
+  border: 1px solid #dfe7f1;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  margin: 0;
+}
+.attachment-text-note {
+  font-size: 11px;
+  color: #6b7a90;
+}
 .attachment-failed {
   display: flex;
   align-items: center;

@@ -10,7 +10,7 @@ export const MAX_FILES_PER_PICK = 5;
 /** ひとつのTODO(TODO単位とメモ単位の合計)に添付できる上限。 */
 export const MAX_ATTACHMENTS_PER_TODO = 50;
 
-export type AttachmentCategory = "image" | "video" | "file";
+export type AttachmentCategory = "image" | "video" | "text" | "file";
 
 export interface AttachmentFormat {
   /** 受け付ける拡張子(小文字)。 */
@@ -35,7 +35,26 @@ const FORMATS: readonly AttachmentFormat[] = [
     category: "file",
   },
   { ext: "pdf", contentType: "application/pdf", category: "file" },
-  { ext: "txt", contentType: "text/plain", category: "file" },
+  // 人間が読み書きするテキストはすべて text/plain で保存し、"text" として
+  // インラインプレビューする。コード(.py/.tsx 等)は対象外なので入れていない。
+  ...[
+    "txt",
+    "md",
+    "csv",
+    "tsv",
+    "xml",
+    "json",
+    "yaml",
+    "yml",
+    "ini",
+    "log",
+    "srt",
+    "vtt",
+  ].map((ext) => ({
+    ext,
+    contentType: "text/plain",
+    category: "text" as const,
+  })),
 ];
 
 export const findFormat = (filename: string): AttachmentFormat | null => {
@@ -47,7 +66,7 @@ export const findFormat = (filename: string): AttachmentFormat | null => {
 };
 
 export type AttachmentErrorCode =
-  "no-file" | "unknown-format" | "too-large" | "empty" | "content-mismatch";
+  "no-file" | "too-large" | "empty" | "content-mismatch";
 
 export class AttachmentValidationError extends Error {
   constructor(
@@ -68,28 +87,16 @@ export interface VerifiedFile {
 
 /**
  * ブラウザから受け取った1ファイルを検証する。拡張子・宣言MIME・マジック
- * ナンバー・容量のすべてを確かめ、失敗は AttachmentValidationError に寄せる。
+ * ナンバー・容量を確かめ、失敗は AttachmentValidationError に寄せる。
+ * 既知形式は中身まで確認する。未知の拡張子は容量と宣言MIMEの正規化だけを
+ * 行い、すべてのファイルを添付可能とする（中身の検証は形式が分からないため
+ * 行わない）。
  */
 export async function verifyAttachment(
   filename: string,
   declaredType: string,
   file: Blob,
 ): Promise<VerifiedFile> {
-  const format = findFormat(filename);
-  if (!format)
-    throw new AttachmentValidationError(
-      "unknown-format",
-      "unsupported file extension",
-    );
-  if (declaredType) {
-    const [declaredFamily] = declaredType.split("/");
-    const [expectedFamily] = format.contentType.split("/");
-    if (declaredFamily !== expectedFamily)
-      throw new AttachmentValidationError(
-        "content-mismatch",
-        "declared content type does not match the extension",
-      );
-  }
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (bytes.length === 0)
     throw new AttachmentValidationError("empty", "file is empty");
@@ -98,12 +105,39 @@ export async function verifyAttachment(
       "too-large",
       "file size exceeds the limit",
     );
+  const format = findFormat(filename);
+  if (!format)
+    return {
+      filename,
+      contentType: safeContentType(declaredType),
+      category: "file",
+    };
+  if (declaredType && format.category !== "text") {
+    // 宣言MIMEと拡張子の家族(型の前半)が違うときだけ弾く。テキスト形式は
+    // ブラウザごとの宣言ブレ(text/markdown など)が大きいため省く。
+    const [declaredFamily] = declaredType.split("/");
+    const [expectedFamily] = format.contentType.split("/");
+    if (declaredFamily !== expectedFamily)
+      throw new AttachmentValidationError(
+        "content-mismatch",
+        "declared content type does not match the extension",
+      );
+  }
   assertSignature(bytes, format);
   return {
     filename,
     contentType: format.contentType,
     category: format.category,
   };
+}
+
+/** 未知の拡張子のときに保存するMIME。実行可能な表示になり得るものは避ける。 */
+export function safeContentType(declaredType: string): string {
+  const base = declaredType.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(base)) return "application/octet-stream";
+  if (base === "text/html" || base === "application/xhtml+xml" || base === "image/svg+xml")
+    return "application/octet-stream";
+  return base;
 }
 
 /**
@@ -164,7 +198,7 @@ function assertSignature(bytes: Uint8Array, format: AttachmentFormat): void {
       throw mismatch("content is not a PowerPoint presentation");
     return;
   }
-  // TXT は UTF-8 として完全にデコードできるときだけ認める。
+  // テキスト形式(tx/md/json/...)は UTF-8 として完全にデコードできるときだけ認める。
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {

@@ -7,8 +7,8 @@ import { VideoPlayer } from "./VideoPlayer";
 
 /**
  * 添付一覧。署名付きURLは永続保存しないため、表示のたびにAPIから引き直す。
- * 画像はクリックで拡大、動画(mp4/webm)はプレイヤー、それ以外はダウンロード
- * 中心のファイルカード。
+ * 画像はクリックで拡大、動画(mp4/webm)はプレイヤー、テキストはインライン
+ * プレビュー、それ以外はダウンロード中心のファイルカード。
  */
 export function useAttachmentUrl(
   attachment: Attachment,
@@ -34,6 +34,47 @@ export function useAttachmentUrl(
   return { url, failed, retry };
 }
 
+/**
+ * テキスト添付の中身を署名付きURLから取得して表示用に整形する。
+ * 長い本文は先頭を切り出す(全文はダウンロードで確認できる)。
+ */
+function useTextPreview(
+  category: string,
+  url: string | null,
+): { content: string | null; truncated: boolean } {
+  const [state, setState] = useState<{ content: string | null; truncated: boolean }>({
+    content: null,
+    truncated: false,
+  });
+  useEffect(() => {
+    if (category !== "text" || !url) {
+      setState({ content: null, truncated: false });
+      return;
+    }
+    let cancelled = false;
+    fetch(url)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("text preview fetch failed");
+        const full = await response.text();
+        if (cancelled) return;
+        setState({
+          content: full.slice(0, TEXT_PREVIEW_MAX_LENGTH),
+          truncated: full.length > TEXT_PREVIEW_MAX_LENGTH,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setState({ content: null, truncated: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [category, url]);
+  return state;
+}
+
+const TEXT_PREVIEW_MAX_LENGTH = 4000;
+
 function AttachmentItem({
   attachment,
   resolver,
@@ -48,6 +89,7 @@ function AttachmentItem({
     attachment.filename,
     attachment.contentType,
   );
+  const preview = useTextPreview(category, url);
   const [zoomed, setZoomed] = useState(false);
   return (
     <li className="attachment-item">
@@ -69,6 +111,48 @@ function AttachmentItem({
         )}
         {category === "video" && url && (
           <VideoPlayer url={url} filename={attachment.filename} />
+        )}
+        {category === "text" && (
+          <div className="file-attachment">
+            <span className="file-attachment-body">
+              <span className="file-attachment-name">
+                {attachment.filename}
+              </span>
+              <span className="file-attachment-size">
+                {fileSizeText(attachment.sizeBytes)}
+              </span>
+            </span>
+            {url && (
+              <a
+                className="button button-secondary download-button"
+                href={url}
+                download={attachment.filename}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={messages.attachment.downloadLabel(
+                  attachment.filename,
+                )}
+              >
+                <Download size={15} />
+                {messages.attachment.download}
+              </a>
+            )}
+          </div>
+        )}
+        {category === "text" && preview.content !== null && (
+          <>
+            <pre
+              className="attachment-text-preview"
+              aria-label={messages.attachment.textPreview(attachment.filename)}
+            >
+              {preview.content}
+            </pre>
+            {preview.truncated && (
+              <span className="attachment-text-note">
+                {messages.attachment.textTruncated}
+              </span>
+            )}
+          </>
         )}
         {category === "file" && (
           <div className="file-attachment">

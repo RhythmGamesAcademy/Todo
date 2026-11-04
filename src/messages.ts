@@ -318,9 +318,6 @@ export const messages = {
     maxPick: "選択は5件までです。",
     maxSize: (name: string) => name + "は3MBを超えています。",
     emptyFile: "空のファイルは添付できません。",
-    unknownType: (name: string) =>
-      name +
-      "は対応していない形式です。画像・動画・PowerPoint・PDF・テキストだけ添付できます。",
     removeLabel: (name: string) => name + "を選択から外す",
     uploadRetry: "もう一度試す",
     uploading: "送信中…",
@@ -338,6 +335,9 @@ export const messages = {
     limitReached: "このTODOに添付できるファイルは50件までです。",
     loadFailed: "ファイルの表示準備に失敗しました",
     previewLabel: (name: string) => name + "のプレビュー",
+    textPreview: (name: string) => name + "のテキストプレビュー",
+    textTruncated:
+      "テキストが長いため先頭のみ表示しています。全文はダウンロードで確認できます。",
     videoLabel: (name: string) => name + "の再生",
     downloadLabel: (name: string) => name + "をダウンロード（別タブで開く）",
     download: "ダウンロード",

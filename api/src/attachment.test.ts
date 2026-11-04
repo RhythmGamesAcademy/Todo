@@ -106,14 +106,39 @@ describe("添付ファイルの検証", () => {
     ).resolves.toMatchObject({ contentType: "video/webm" });
   });
 
-  it("PDF・TXTを受け付ける", async () => {
+  it("PDF・テキスト形式を受け付ける", async () => {
     await expect(
       verifyAttachment("d.pdf", "", buildFile("d.pdf", ascii("%PDF-1.7"))),
     ).resolves.toMatchObject({ contentType: "application/pdf" });
-    // TXTはUTF-8として解釈できる中身が条件。
+    // テキスト形式はUTF-8として解釈できる中身が条件。text/plain で
+    //カテゴリ "text" になりインラインプレビューの対象になる。
     await expect(
       verifyAttachment("d.txt", "text/plain", buildFile("d.txt", utf8("メモ"))),
-    ).resolves.toMatchObject({ contentType: "text/plain" });
+    ).resolves.toMatchObject({ contentType: "text/plain", category: "text" });
+    await expect(
+      verifyAttachment("b.md", "text/markdown", buildFile("b.md", utf8("# 案"))),
+    ).resolves.toMatchObject({ category: "text" });
+    await expect(
+      verifyAttachment(
+        "j.json",
+        "application/json",
+        buildFile("j.json", utf8('{"a":1}')),
+      ),
+    ).resolves.toMatchObject({ contentType: "text/plain", category: "text" });
+    await expect(
+      verifyAttachment(
+        "s.xml",
+        "application/xml",
+        buildFile("s.xml", utf8("<a><b/></a>")),
+      ),
+    ).resolves.toMatchObject({ category: "text" });
+    await expect(
+      verifyAttachment(
+        "c.csv",
+        "text/csv",
+        buildFile("c.csv", utf8("id,title\n" + "1,設計\n")),
+      ),
+    ).resolves.toMatchObject({ category: "text" });
   });
 
   it("PPTXはZIPに加えてプレゼンテーション本体のエントリも確認する", async () => {
@@ -139,23 +164,32 @@ describe("添付ファイルの検証", () => {
     );
   });
 
-  it("対応していない拡張子はunknown-format", async () => {
-    await expectCode(
+  it("未知の拡張子でも添付できる。宣言MIMEは安全な形に正規化する", async () => {
+    // DOCXなど中身を検証できない形式は容量・MIME正規化だけで受け付ける。
+    await expect(
       verifyAttachment("a.docx", "", buildFile("a.docx", ascii("PK\x03\x04"))),
-      "unknown-format",
-    );
-    await expectCode(
-      verifyAttachment("noext", "", buildFile("noext", PNG_HEADER)),
-      "unknown-format",
-    );
+    ).resolves.toMatchObject({
+      contentType: "application/octet-stream",
+      category: "file",
+    });
+    await expect(
+      verifyAttachment(
+        "noext",
+        "image/png",
+        buildFile("noext", PNG_HEADER),
+      ),
+    ).resolves.toMatchObject({ contentType: "image/png", category: "file" });
+    // 危険な表示になり得る宣言は無害なフォールバックへ寄せる。
+    await expect(
+      verifyAttachment(
+        "x.page",
+        "text/html; charset=utf-8",
+        buildFile("x.page", ascii("<h1>")),
+      ),
+    ).resolves.toMatchObject({ contentType: "application/octet-stream" });
   });
 
-  it("拡張子と一致しない中身はcontent-mismatch", async () => {
-    const fakePng = Uint8Array.from([0x00, 0x01, 0x02, 0x03]);
-    await expectCode(
-      verifyAttachment("fake.png", "", buildFile("fake.png", fakePng)),
-      "content-mismatch",
-    );
+  it("テキスト形式の中身がUTF-8でないならcontent-mismatch", async () => {
     // テキストとして解釈できないTXT。
     await expectCode(
       verifyAttachment(
@@ -163,6 +197,14 @@ describe("添付ファイルの検証", () => {
         "",
         buildFile("a.txt", Uint8Array.from([0xff, 0xfe, 0x00, 0x81])),
       ),
+      "content-mismatch",
+    );
+  });
+
+  it("拡張子と一致しない中身はcontent-mismatch", async () => {
+    const fakePng = Uint8Array.from([0x00, 0x01, 0x02, 0x03]);
+    await expectCode(
+      verifyAttachment("fake.png", "", buildFile("fake.png", fakePng)),
       "content-mismatch",
     );
   });

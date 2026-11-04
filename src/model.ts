@@ -90,7 +90,7 @@ export const FILTER_LABEL: Record<Filter, string> = messages.filters.heading;
 export const MAX_ATTACHMENT_SIZE_BYTES = 3 * 1024 * 1024;
 /** 一度に選択できる添付の上限。逐次アップロードは別。 */
 export const MAX_ATTACHMENTS_PER_PICK = 5;
-export type AttachmentCategory = "image" | "video" | "file";
+export type AttachmentCategory = "image" | "video" | "text" | "file";
 
 /**
  * ファイル名/MIMEから添付の表示区分を推定する。
@@ -113,8 +113,61 @@ export function attachmentCategory(
   const ext = filenameExt(filename);
   if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return "image";
   if (["mp4", "webm"].includes(ext)) return "video";
+  if (TEXT_PREVIEW_EXTENSIONS.includes(ext)) return "text";
+  // text/plain でもコード系拡張子はプレビューしない。
+  if (contentType === "text/plain" && !CODE_PREVIEW_EXCLUDED_EXTENSIONS.includes(ext))
+    return "text";
   return "file";
 }
+
+/**
+ * テキストとしてインライン表示する拡張子。
+ * .py/.tsx などのコード系は含めない(ダウンロードカードのまま)。
+ * api/src/attachment.ts のテキスト形式と揃える。
+ */
+const TEXT_PREVIEW_EXTENSIONS = [
+  "txt",
+  "md",
+  "csv",
+  "tsv",
+  "xml",
+  "json",
+  "yaml",
+  "yml",
+  "ini",
+  "log",
+  "srt",
+  "vtt",
+];
+
+/** text/plain の宣言でもプレビュー対象外とするコード系拡張子。 */
+const CODE_PREVIEW_EXCLUDED_EXTENSIONS = [
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "java",
+  "kt",
+  "swift",
+  "php",
+  "sql",
+  "sh",
+  "bash",
+  "bat",
+  "ps1",
+  "html",
+  "htm",
+  "css",
+  "scss",
+];
 
 /** 拡張子だけの取り出し(小文字化)。不明な場合は空文字。 */
 function filenameExt(filename: string): string {
@@ -123,29 +176,12 @@ function filenameExt(filename: string): string {
   return dot === -1 ? "" : base.slice(dot + 1).toLowerCase();
 }
 
-/** 初期実装で受け付ける拡張子。api/src/attachment.ts と揃える。 */
-const ALLOWED_ATTACHMENT_EXTENSIONS = [
-  "jpg",
-  "jpeg",
-  "png",
-  "webp",
-  "gif",
-  "mp4",
-  "webm",
-  "mov",
-  "pptx",
-  "pdf",
-  "txt",
-];
-
 /**
  * 選択したファイルのブラウザ側検証。問題なければ null、
  * あれば日本語のエラーメッセージを返す(送信前に足切りする)。
+ * 拡張子は問わない(すべてのファイルを添付可能)。
  */
 export function attachmentFileError(file: File): string | null {
-  const ext = filenameExt(file.name);
-  if (!ALLOWED_ATTACHMENT_EXTENSIONS.includes(ext))
-    return messages.attachment.unknownType(file.name);
   if (file.size <= 0) return messages.attachment.emptyFile;
   if (file.size > MAX_ATTACHMENT_SIZE_BYTES)
     return messages.attachment.maxSize(file.name);
