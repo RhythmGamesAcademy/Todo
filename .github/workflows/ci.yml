@@ -1,0 +1,24 @@
+name: CI
+
+# push to main は Vercel の Git 統合で直接デプロイされるため、このワークフロー
+# は直接プッシュ時の検知(main にも実施)とPR時のゲート(PR → main)を担う。
+# Vercel のデプロイ自体を止めるには Deployment Protection(ダッシュボード設定)
+# が必要。監査 2026-11-06 M-002。
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
