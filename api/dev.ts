@@ -18,6 +18,15 @@ const app = createApp({
 });
 const port = 3000;
 
-serve({ fetch: app.fetch, port }, () => {
-  console.log(`API を http://127.0.0.1:${port} で起動しました。`);
-});
+serve(
+  {
+    fetch: app.fetch,
+    port,
+    // ローカル開発でもLANから叩けないよう、全インターフェースを開けない
+    // (監査 L-004)。認証の無いAPIを 0.0.0.0 に置かない。
+    hostname: "127.0.0.1",
+  },
+  () => {
+    console.log(`API を http://127.0.0.1:${port} で起動しました。`);
+  },
+);
