@@ -385,9 +385,29 @@ export async function fetchAttachmentUrl(
       encodeURIComponent(attachmentId) +
       "/url",
   );
-  if (!data || !data.url) throw new ApiError(500, "invalid url response");
+  if (!data?.url || !isStorageUrl(data.url))
+    throw new ApiError(500, "invalid url response");
   return data;
 }
+
+// 取得したURLは img/video/href にそのまま渡す。踏まれた・壊れたAPIが
+// 攻撃ホストや社内イントラネットへのURLを返しても拾わないよう、https と
+// ストレージ配信元のホスト(vercel.json の CSP が許す *.neon.tech)を
+// 必ず確認する(監査 2026-11-06 L-002)。
+const STORAGE_HOST_SUFFIX = ".neon.tech";
+
+const isStorageUrl = (raw: string): boolean => {
+  try {
+    const url = new URL(raw);
+    return (
+      url.protocol === "https:" &&
+      (url.hostname === "neon.tech" ||
+        url.hostname.endsWith(STORAGE_HOST_SUFFIX))
+    );
+  } catch {
+    return false;
+  }
+};
 
 /** 添付ファイルの削除。失敗したら行が残るため再試行できる。 */
 export async function deleteAttachment(

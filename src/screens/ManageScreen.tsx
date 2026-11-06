@@ -35,7 +35,11 @@ export function ManageScreen({
   const [title, setTitle] = useState(state.list.title);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const shareUrl =
-    window.location.origin + window.location.pathname + "#token=" + token;
+    window.location.origin +
+    window.location.pathname +
+    "#token=" +
+    // client.ts の listPath と同じく必ずエンコードする(監査 L-005)。
+    encodeURIComponent(token);
 
   // 他の端末からの変更を、編集中の入力より優先しない形で反映する。
   useEffect(() => {

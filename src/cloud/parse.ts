@@ -37,6 +37,13 @@ const NOTIFICATION_KINDS: readonly NotificationKind[] = [
 ];
 const MAX_TAGS = 5;
 const MAX_TAG_LENGTH = 20;
+// 応答配列の上限はサーバー側(ACTIVITY_LIMIT=500, NOTIFICATION_LIMIT=100)と
+// 同じ値に揃える。壊れた/踏まれたバックエンドによるDOM・メモリ肥大を
+// クライアントでも防ぐ(監査 L-001)。
+const MAX_ACTIVITIES = 500;
+const MAX_NOTIFICATIONS = 100;
+const MAX_SUBTASKS = 50;
+const MAX_SUBTASK_MEMOS = 100;
 
 const fail = (): never => {
   throw new Error(messages.errors.invalidState);
@@ -48,6 +55,11 @@ const validText = (x: unknown, max: number): x is string =>
   typeof x === "string" && !!x.trim() && x.length <= max;
 const nullableString = (x: unknown): x is string | null =>
   x === null || typeof x === "string";
+// 自由文でなく長さ上限のある nullable 文字列。値の内容までは見ない。
+const nullableBoundedString =
+  (max: number) =>
+  (x: unknown): x is string | null =>
+    x === null || (typeof x === "string" && x.length <= max);
 const optionalString = (x: unknown): x is string | null | undefined =>
   x === undefined || nullableString(x);
 const ISO_TIMESTAMP =
@@ -209,7 +221,8 @@ function validateSubtask(value: unknown, ids: Set<string>): void {
     !(value.deadline === null || isIsoTimestamp(value.deadline)) ||
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt) ||
-    !Array.isArray(value.memos)
+    !Array.isArray(value.memos) ||
+    value.memos.length > MAX_SUBTASK_MEMOS
   )
     return fail();
   ids.add(value.id);
@@ -242,6 +255,7 @@ function validateTodo(value: unknown, ids: Set<string>): void {
     !isIsoTimestamp(value.updatedAt) ||
     !Array.isArray(value.notes) ||
     !(value.subtasks === undefined || Array.isArray(value.subtasks)) ||
+    (value.subtasks?.length ?? 0) > MAX_SUBTASKS ||
     !validateAttachments(value.attachments)
   )
     return fail();
@@ -261,9 +275,9 @@ function validateActivity(value: unknown, ids: Set<string>): void {
     !nullableString(value.todoId) ||
     !nullableString(value.userId) ||
     !oneOf(ACTIVITY_KINDS, value.kind) ||
-    !nullableString(value.field) ||
-    !nullableString(value.before) ||
-    !nullableString(value.after) ||
+    !nullableBoundedString(100)(value.field) ||
+    !nullableBoundedString(2000)(value.before) ||
+    !nullableBoundedString(2000)(value.after) ||
     !isIsoTimestamp(value.createdAt)
   )
     return fail();
@@ -278,7 +292,7 @@ function validateNotification(value: unknown, ids: Set<string>): void {
     !nullableString(value.todoId) ||
     !nullableString(value.userId) ||
     !oneOf(NOTIFICATION_KINDS, value.kind) ||
-    !nullableString(value.body) ||
+    !nullableBoundedString(2000)(value.body) ||
     !isIsoTimestamp(value.createdAt)
   )
     return fail();
@@ -293,7 +307,11 @@ export function parseCloudState(input: unknown): CloudState {
     !Array.isArray(input.todos) ||
     input.todos.length > 10000 ||
     !Array.isArray(input.activities) ||
-    !(input.notifications === undefined || Array.isArray(input.notifications))
+    input.activities.length > MAX_ACTIVITIES ||
+    !(
+      input.notifications === undefined || Array.isArray(input.notifications)
+    ) ||
+    (input.notifications?.length ?? 0) > MAX_NOTIFICATIONS
   )
     return fail();
   const userIds = new Set<string>();
