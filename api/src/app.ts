@@ -35,17 +35,17 @@ import {
 import {
   AttachmentValidationError,
   MAX_ATTACHMENTS_PER_TODO,
+  isInlineRenderable,
   verifyAttachment,
 } from "./attachment.js";
 import type { ObjectStorage } from "./object-storage.js";
 import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
+import { rateLimit, clientIp } from "./rate-limit.js";
 
 export interface AppDeps {
   sql: Sql;
   transact: Transact;
   describe?: () => Promise<DbInfo>;
-  /** @deprecated Discord保存は廃止済み。互換テスト入力としてのみ許可。 */
-  discord?: unknown;
   objectStorage?: ObjectStorage;
 }
 
@@ -295,8 +295,43 @@ async function readOptionalJson(c: Context): Promise<Record<string, unknown>> {
   return body as Record<string, unknown>;
 }
 
-export function createApp({ sql, transact, describe, objectStorage }: AppDeps): Hono {
+export function createApp({
+  sql,
+  transact,
+  describe,
+  objectStorage,
+}: AppDeps): Hono {
   const app = new Hono();
+
+  // 認証済み呼び出し元の概念が無いため、期限付きトークンを持つ人全員が
+  // 書き込める。無制限の行/バイト書き込みを避けるため、リスト作成・参加と
+  // アップロード3経路に短期集中の上限を置く(監査 M-003)。上限は緩めにして
+  // 正常操作は妨げない。Vercel Firewall(ダッシュボード)が大元の防御。
+  const perIp = (scope: string, max: number) =>
+    rateLimit({ scope, max, windowMs: 60_000, key: clientIp });
+  const perToken = (scope: string, max: number) =>
+    rateLimit({
+      scope,
+      max,
+      windowMs: 60_000,
+      key: (c) => c.req.param("token") || clientIp(c),
+    });
+  // リスト作成と参加は未認証(トークン不要)なのでIPで絞る。
+  app.use("/api/lists", perIp("list-create", 120));
+  app.use("/api/lists/:token/join", perToken("join", 120));
+  // アップロードは3経路とも1ファイル=1リクエスト。
+  app.use(
+    "/api/lists/:token/todos/:todoId/attachments",
+    perToken("upload", 120),
+  );
+  app.use(
+    "/api/lists/:token/todos/:todoId/memos/with-attachment",
+    perToken("upload", 120),
+  );
+  app.use(
+    "/api/lists/:token/todos/:todoId/memos/:memoId/attachments",
+    perToken("upload", 120),
+  );
 
   const findList = async (token: string): Promise<ListRow | null> => {
     const [list] = rowsOf<ListRow>(
@@ -464,8 +499,30 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
       throw new ApiException(400, "attachment limit reached");
   };
 
+  // TODO単位・1リクエスト単位の上限だけでは、TODO数が無制限なので
+  // リスト全体の書き込み総量が無制限になる。そこでリストごとに合計
+  // バイト数の上限を設け、storage.put の前に必ず確認する(監査 M-003)。
+  const MAX_LIST_STORAGE_BYTES = 100 * 1024 * 1024; // 100 MiB
+
+  const assertListStorageBudget = async (
+    listId: string,
+    incomingBytes: number,
+  ): Promise<void> => {
+    const [row] = rowsOf<{ total: string | number }>(
+      await sql`
+        SELECT coalesce(sum(a.size_bytes), 0)::bigint AS total
+        FROM public.attachments a
+        JOIN public.todos t ON t.id = a.todo_id
+        WHERE t.list_id = ${listId}
+      `,
+    );
+    if (Number(row?.total ?? 0) + incomingBytes > MAX_LIST_STORAGE_BYTES)
+      throw new ApiException(400, "attachment storage budget exceeded");
+  };
+
   /** オブジェクトストレージへの保存とNeonへの登録。 */
   const uploadAndRegister = async (params: {
+    listId: string;
     todoId: string;
     memoId: string | null;
     userId: string | null;
@@ -474,6 +531,7 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
     file: Blob;
   }): Promise<void> => {
     await assertAttachmentLimit(params.todoId);
+    await assertListStorageBudget(params.listId, params.file.size);
     const attachmentId = randomUUID();
     const objectKey = `attachments/${attachmentId}`;
     const storage = requireObjectStorage();
@@ -682,9 +740,7 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
           await requireObjectStorage().delete(object.object_key);
         } catch (error) {
           console.error(error);
-          remnants.push(
-            object.object_key,
-          );
+          remnants.push(object.object_key);
         }
       }
       if (remnants.length > 0)
@@ -1159,6 +1215,7 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
       const userId = await optionalUserIdFromForm(form, list.id);
       const verified = await extractVerifiedFile(form);
       await uploadAndRegister({
+        listId: list.id,
         todoId: todo.id,
         memoId: null,
         userId,
@@ -1201,6 +1258,7 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
         const verified = await extractVerifiedFile(form);
         const memoId = randomUUID();
         await assertAttachmentLimit(todo.id);
+        await assertListStorageBudget(list.id, verified.file.size);
         const attachmentId = randomUUID();
         const objectKey = `attachments/${attachmentId}`;
         // 送信者以外のメンバーを候補に、本文中の @<名前>(完全一致)をメンションとする。
@@ -1272,6 +1330,7 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
         const userId = await optionalUserIdFromForm(form, list.id);
         const verified = await extractVerifiedFile(form);
         await uploadAndRegister({
+          listId: list.id,
           todoId: todo.id,
           memoId: memo.id,
           userId,
@@ -1295,6 +1354,12 @@ export function createApp({ sql, transact, describe, objectStorage }: AppDeps): 
     const url = await requireObjectStorage().signedUrl({
       key: row.object_key,
       contentType: row.content_type,
+      // プレビューできる形式(画像・動画・テキスト)だけ inline。
+      // それ以外は保存先の配信元(CSP 外)で解釈されるため
+      // Content-Disposition: attachment でダウンロードに強制する(監査 M-001)。
+      contentDisposition: isInlineRenderable(row.content_type)
+        ? "inline"
+        : "attachment",
     });
     return c.json({
       url,

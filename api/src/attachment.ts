@@ -108,7 +108,7 @@ export async function verifyAttachment(
   const format = findFormat(filename);
   if (!format)
     return {
-      filename,
+      filename: sanitizeFilename(filename),
       contentType: safeContentType(declaredType),
       category: "file",
     };
@@ -125,19 +125,61 @@ export async function verifyAttachment(
   }
   assertSignature(bytes, format);
   return {
-    filename,
+    filename: sanitizeFilename(filename),
     contentType: format.contentType,
     category: format.category,
   };
 }
 
-/** 未知の拡張子のときに保存するMIME。実行可能な表示になり得るものは避ける。 */
+/**
+ * ファイル名はそのまま保存されるため、パス区切りを取り除き上限長に丸める
+ * (Info: 監査 2026-11-06 の防御的硬化)。表示は React がエスケープするため、
+ * ここでは保存時の安全性だけを担保する。
+ */
+export function sanitizeFilename(filename: string): string {
+  const cleaned = filename.replace(/[\\/]+/g, "_");
+  if (cleaned.length <= MAX_FILENAME_LENGTH) return cleaned;
+  const dot = cleaned.lastIndexOf(".");
+  // できるだけ限り拡張子を保ち、ベース部分に上限長を配分する。
+  if (dot > 0 && cleaned.length - dot <= 11)
+    return (
+      cleaned.slice(0, MAX_FILENAME_LENGTH - (cleaned.length - dot)) +
+      cleaned.slice(dot)
+    );
+  return cleaned.slice(0, MAX_FILENAME_LENGTH);
+}
+
+const MAX_FILENAME_LENGTH = 255;
+
+/**
+ * 未知の拡張子のときに保存するMIME。実行可能な表示になり得るものを避けるため、
+ * 既知の拡張子族が宣言するMIMEだけを許可する(deny-listではなく許可リスト)。
+ * URLをそのまま開いたときにブラウザが解釈する MIME(text/html,
+ * application/xhtml+xml, image/svg+xml, text/javascript など)は
+ * すべてここで落とし、application/octet-stream に寄せる。
+ */
+const SAFE_CONTENT_TYPES: ReadonlySet<string> = new Set(
+  FORMATS.map((format) => format.contentType),
+);
+
 export function safeContentType(declaredType: string): string {
   const base = declaredType.split(";")[0]?.trim().toLowerCase() ?? "";
-  if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(base)) return "application/octet-stream";
-  if (base === "text/html" || base === "application/xhtml+xml" || base === "image/svg+xml")
-    return "application/octet-stream";
-  return base;
+  if (SAFE_CONTENT_TYPES.has(base)) return base;
+  return "application/octet-stream";
+}
+
+/**
+ * 署名付きURLでインライン表示してよい Category。画像・動画・テキストは
+ * プレビューのために inline で、それ以外(ファイル類、未知MIME)は
+ * ダウンロードとして扱うため Content-Disposition: attachment を付ける
+ * (監査 2026-11-06 M-001)。
+ */
+export function isInlineRenderable(contentType: string): boolean {
+  return (
+    contentType.startsWith("image/") ||
+    contentType.startsWith("video/") ||
+    contentType === "text/plain"
+  );
 }
 
 /**

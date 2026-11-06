@@ -13,7 +13,13 @@ export interface QueuedFile {
   error?: string;
 }
 
-const ACCEPTANCE = ".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,.mov,.pptx,.pdf,.txt";
+// サーバーが受け付ける既知の拡張子(attachment.ts の FORMATS)に、
+// その他のテキスト・ファイル形式を足した最小限の目安(選択ダイアログの絞り
+// 込み)。未対応拡張子でも任意のファイルを添付可能なため、見えない場合は
+// 「すべてのファイル」に切り替えても送れる。
+const ACCEPTANCE =
+  ".jpg,.jpeg,.png,.webp,.gif,.mp4,.webm,.mov,.pptx,.pdf," +
+  ".txt,.md,.csv,.tsv,.xml,.json,.yaml,.yml,.ini,.log,.srt,.vtt";
 
 /**
  * TODO単位の添付アップローダー。ファイル選択・複数選択・ドラッグ＆ドロップ・

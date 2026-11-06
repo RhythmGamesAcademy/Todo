@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseCloudState } from "../../src/cloud/parse";
 import { createApp } from "./app";
-import type { DiscordClient } from "./discord.js";
+import type { ObjectStorage } from "./object-storage.js";
 import { makeDb } from "./sql";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -829,50 +829,55 @@ describeDb("共有リストAPI", () => {
   });
 });
 
-// Discord への投稿を置き換えるテスト用クライアント。実APIには触れない。
-class FakeDiscordClient implements DiscordClient {
+// オブジェクトストレージを置き換えるテスト用クライアント。外部には触れない。
+class FakeObjectStorage implements ObjectStorage {
   readonly uploads: Array<{
-    filename: string;
+    key: string;
     contentType: string;
     size: number;
   }> = [];
-  readonly deletedMessageIds: string[] = [];
-  readonly messageIdsByFilename = new Map<string, string>();
-  failDelete = false;
-  private nextId = 0;
-
-  async uploadMessage(params: {
-    filename: string;
+  readonly signed: Array<{
+    key: string;
     contentType: string;
-    file: Blob;
-  }): Promise<{ messageId: string; attachmentId: string; channelId: string }> {
-    const messageId = `msg-${(this.nextId += 1)}`;
+    contentDisposition?: "inline" | "attachment";
+  }> = [];
+  readonly deletedKeys: string[] = [];
+  failPut = false;
+  failDelete = false;
+
+  async put({
+    key,
+    contentType,
+    body,
+  }: {
+    key: string;
+    contentType: string;
+    body: Blob;
+  }): Promise<void> {
+    if (this.failPut) throw new Error("storage put failed");
     this.uploads.push({
-      filename: params.filename,
-      contentType: params.contentType,
-      size: params.file.size,
+      key,
+      contentType,
+      size: body.size,
     });
-    this.messageIdsByFilename.set(params.filename, messageId);
-    return { messageId, attachmentId: `att-${messageId}`, channelId: "ch-1" };
   }
 
-  async fetchMessage(messageId: string): Promise<{
-    id: string;
-    attachments: Array<{ id: string; url: string }>;
-  } | null> {
-    if (this.deletedMessageIds.includes(messageId)) return null;
-    return {
-      id: messageId,
-      attachments: [
-        { id: `att-${messageId}`, url: `https://cdn.example/${messageId}~f/x` },
-      ],
-    };
+  async signedUrl({
+    key,
+    contentType,
+    contentDisposition,
+  }: {
+    key: string;
+    contentType: string;
+    contentDisposition?: "inline" | "attachment";
+  }): Promise<string> {
+    this.signed.push({ key, contentType, contentDisposition });
+    return `https://storage.example.test/${key}`;
   }
 
-  async deleteMessage(messageId: string): Promise<boolean> {
-    if (this.failDelete) throw new Error("discord delete failed");
-    this.deletedMessageIds.push(messageId);
-    return true;
+  async delete(key: string): Promise<void> {
+    if (this.failDelete) throw new Error("storage delete failed");
+    this.deletedKeys.push(key);
   }
 }
 
@@ -891,11 +896,11 @@ const txtFile = (body = "こんにちは", filename = "shot.txt"): File =>
   });
 
 // リスト削除はデータを消すため、最後に独立したブロックで実行する。
-describeDb("添付ファイルAPI（Discord CDN連携）", () => {
+describeDb("添付ファイルAPI（オブジェクトストレージ連携）", () => {
   const db = makeDb(databaseUrl ?? "");
-  const discord = new FakeDiscordClient();
-  const app = createApp({ ...db, discord });
-  // Discord 未設定のときの挙動を確認するための別インスタンス。
+  const storage = new FakeObjectStorage();
+  const app = createApp({ ...db, objectStorage: storage });
+  // ストレージ未設定のときの挙動を確認するための別インスタンス。
   const bareApp = createApp(db);
   let token = "";
   let userId = "";
@@ -945,7 +950,16 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     return row.id;
   };
 
-  it("TODO単位の添付をDiscordに投稿してNeonに登録し、stateとURLの再取得で確認できる", async () => {
+  const objectKeyOf = async (attachmentId: string): Promise<string> => {
+    const [row] = (
+      await db.sql`
+        SELECT object_key FROM public.attachments WHERE id = ${attachmentId}
+      `
+    ).rows as Array<{ object_key: string }>;
+    return row.object_key;
+  };
+
+  it("TODO単位の添付をオブジェクトストレージに保存してNeonに登録し、stateとURLの再取得で確認できる", async () => {
     const before = await (await app.request(`/api/lists/${token}`)).json();
     const res = await postTodoAttachment(pngFile());
     expect(res.status).toBe(201);
@@ -959,9 +973,14 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     });
     expect(body.revision).toBeGreaterThan(before.list.revision);
 
-    // Discord への投稿は拡張子に対応した MIME と実サイズで行われる。
-    expect(discord.uploads).toEqual([
-      { filename: "gazou.png", contentType: "image/png", size: 10 },
+    // ストレージへの保存は拡張子に対応した MIME と実サイズ、
+    // サーバー生成キー(attachments/<UUID>)で行われる。
+    expect(storage.uploads).toEqual([
+      {
+        key: expect.stringMatching(/^attachments\/[0-9a-f-]{36}$/),
+        contentType: "image/png",
+        size: 10,
+      },
     ]);
 
     const state = await (await app.request(`/api/lists/${token}`)).json();
@@ -976,16 +995,38 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
       },
     ]);
 
-    // URL は署名付きなため保存せず、必要時に Discord から引き直す。
+    // URL は署名付きなため保存せず、必要時にストレージから引き直す。
+    // プレビュー可能な形式(画像)は inline で署名する(監査 M-001)。
     const attachmentId = await latestAttachmentId();
+    const objectKey = await objectKeyOf(attachmentId);
     const urlRes = await app.request(
       `/api/lists/${token}/attachments/${attachmentId}/url`,
     );
     expect(urlRes.status).toBe(200);
     expect(await urlRes.json()).toEqual({
-      url: "https://cdn.example/msg-1~f/x",
+      url: `https://storage.example.test/${objectKey}`,
       filename: "gazou.png",
       contentType: "image/png",
+    });
+    expect(storage.signed).toEqual([
+      {
+        key: objectKey,
+        contentType: "image/png",
+        contentDisposition: "inline",
+      },
+    ]);
+  });
+
+  it("プレビュー対象外の形式は Content-Disposition: attachment で署名する", async () => {
+    // 未知の拡張子は許可リストで octet-stream に正規化され、"file" として
+    // インライン表示せずダウンロードに強制する。
+    const res = await postTodoAttachment(
+      new File([pngBytes()], "gazou.bin", { type: "application/octet-stream" }),
+    );
+    expect(res.status).toBe(201);
+    expect(storage.signed.at(-1)).toMatchObject({
+      contentType: "application/octet-stream",
+      contentDisposition: "attachment",
     });
   });
 
@@ -1019,12 +1060,8 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     expect(todo.attachments).toHaveLength(note.attachments.length + 1);
   });
 
-  it("未対応拡張子・MIME不一致・空ファイル・中身不一致は400、3MiB超過は413", async () => {
+  it("MIME不一致・空ファイル・中身不一致は400、3MiB超過は413", async () => {
     const cases: Array<[File, number]> = [
-      // 拡張子が対応外。
-      [new File([pngBytes()], "gazou.bin", { type: "image/png" }), 400],
-      // ファイル名が拡張子なし。
-      [new File([pngBytes()], "gazou", { type: "image/png" }), 400],
       // 宣言されたMIMEの系統が拡張子と違う。
       [new File([pngBytes()], "gazou.png", { type: "text/plain" }), 400],
       // 空ファイル。
@@ -1043,7 +1080,8 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
       const res = await postTodoAttachment(file);
       expect(res.status).toBe(expected);
     }
-    expect(discord.uploads).toHaveLength(3);
+    // 失敗したリクエストではストレージへ書き込まない。
+    expect(storage.uploads).toHaveLength(2);
   });
 
   it("fileフィールドがない multipart は400", async () => {
@@ -1102,12 +1140,10 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     ).toBe(404);
   });
 
-  it("Discordへの投稿が失敗したら500でNeonに登録しない", async () => {
-    const failDiscord = new FakeDiscordClient();
-    failDiscord.uploadMessage = async () => {
-      throw new Error("discord upload failed");
-    };
-    const failingApp = createApp({ ...db, discord: failDiscord });
+  it("ストレージへの保存が失敗したら500でNeonに登録しない", async () => {
+    const failingStorage = new FakeObjectStorage();
+    failingStorage.failPut = true;
+    const failingApp = createApp({ ...db, objectStorage: failingStorage });
     const form = new FormData();
     form.append("file", pngFile(), "gazou.png");
     form.append("userId", userId);
@@ -1120,33 +1156,33 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     expect(await getAttachmentCount()).toBe(0);
   });
 
-  it("添付削除はDiscordのメッセージも削除し、失敗時は502で行を残す", async () => {
+  it("添付削除はストレージのオブジェクトも削除し、失敗時は502で行を残す", async () => {
     // 追加の1件を用意して消す。
     const res = await postTodoAttachment(txtFile("消すやつ", "kesu.txt"));
     expect(res.status).toBe(201);
     const attachmentId = await latestAttachmentId();
-    const messageId = discord.messageIdsByFilename.get("kesu.txt")!;
+    const objectKey = await objectKeyOf(attachmentId);
 
-    discord.failDelete = true;
+    storage.failDelete = true;
     const failed = await app.request(
       `/api/lists/${token}/attachments/${attachmentId}`,
       { method: "DELETE" },
     );
     expect(failed.status).toBe(502);
     expect(await getAttachmentCount()).toBeGreaterThan(0);
-    // Discord 削除の失敗でもURLの再取得は可能。
+    // オブジェクト削除の失敗でもURLの再取得は可能。
     expect(
       (await app.request(`/api/lists/${token}/attachments/${attachmentId}/url`))
         .status,
     ).toBe(200);
-    discord.failDelete = false;
+    storage.failDelete = false;
 
     const ok = await app.request(
       `/api/lists/${token}/attachments/${attachmentId}`,
       { method: "DELETE" },
     );
     expect(ok.status).toBe(200);
-    expect(discord.deletedMessageIds).toContain(messageId);
+    expect(storage.deletedKeys).toContain(objectKey);
     expect(await getAttachmentCount()).toBeGreaterThan(0);
     // 行が消えたので以降のURL取得は404。
     expect(
@@ -1169,12 +1205,12 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     await db.sql`
       INSERT INTO public.attachments (
         id, todo_id, memo_id,
-        discord_channel_id, discord_message_id, discord_attachment_id,
+        object_key,
         filename, content_type, size_bytes, created_by
       )
       SELECT
         md5(random()::text || g::text)::uuid, ${todoId}, NULL,
-        'ch-seed', 'msg-seed-' || g, 'att-seed-' || g,
+        'attachments/seed-' || g,
         'seed.txt', 'text/plain', 3, ${userId}
       FROM generate_series(1, 50) AS g
     `;
@@ -1194,10 +1230,10 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     expect(await getAttachmentCount()).toBeGreaterThanOrEqual(50);
   });
 
-  it("リスト削除でもDiscordのメッセージを消し、失敗時は502で再試行できる", async () => {
+  it("リスト削除でもストレージのオブジェクトを消し、失敗時は502で再試行できる", async () => {
     // 独立したリストでTODO＋添付を用意する。
-    const cleanupDiscord = new FakeDiscordClient();
-    const cleanupApp = createApp({ ...db, discord: cleanupDiscord });
+    const cleanupStorage = new FakeObjectStorage();
+    const cleanupApp = createApp({ ...db, objectStorage: cleanupStorage });
     const createdList = await cleanupApp.request("/api/lists", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1231,10 +1267,10 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
       { method: "POST", body: attach },
     );
     expect(attached.status).toBe(201);
-    expect(cleanupDiscord.uploads).toHaveLength(1);
-    const messageId = cleanupDiscord.messageIdsByFilename.get("kieta.txt")!;
+    expect(cleanupStorage.uploads).toHaveLength(1);
+    const objectKey = cleanupStorage.uploads[0].key;
 
-    cleanupDiscord.failDelete = true;
+    cleanupStorage.failDelete = true;
     const firstTry = await cleanupApp.request(`/api/lists/${token}`, {
       method: "DELETE",
     });
@@ -1242,16 +1278,16 @@ describeDb("添付ファイルAPI（Discord CDN連携）", () => {
     // リストは残るため、内容を確認できる。
     expect((await cleanupApp.request(`/api/lists/${token}`)).status).toBe(200);
 
-    cleanupDiscord.failDelete = false;
+    cleanupStorage.failDelete = false;
     const secondTry = await cleanupApp.request(`/api/lists/${token}`, {
       method: "DELETE",
     });
     expect(secondTry.status).toBe(200);
-    expect(cleanupDiscord.deletedMessageIds).toContain(messageId);
+    expect(cleanupStorage.deletedKeys).toContain(objectKey);
     expect((await cleanupApp.request(`/api/lists/${token}`)).status).toBe(404);
   });
 
-  it("Discordクライアント未設定では投稿系が500", async () => {
+  it("オブジェクトストレージ未設定では投稿系が500", async () => {
     const form = new FormData();
     form.append("file", pngFile(), "gazou.png");
     form.append("userId", userId);
@@ -1371,5 +1407,87 @@ describeDb("共有リストの削除", () => {
     expect(Number(counts.todos)).toBe(0);
     expect(Number(counts.users)).toBe(0);
     expect(Number(counts.activities)).toBe(0);
+  });
+});
+
+// 大量の行を積むため、独立した最後のブロックで確認する。
+describeDb("添付のリスト予算", () => {
+  const db = makeDb(databaseUrl ?? "");
+  const storage = new FakeObjectStorage();
+  const app = createApp({ ...db, objectStorage: storage });
+  let token = "";
+  let userId = "";
+  let todoId = "";
+
+  beforeAll(async () => {
+    await db.sql`DELETE FROM lists`;
+    const res = await app.request("/api/lists", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "予算チーム", name: "よ" }),
+    });
+    token = ((await res.json()) as { token: string }).token;
+    const state = await (await app.request(`/api/lists/${token}`)).json();
+    userId = state.users[0].id as string;
+    const listId = state.list.id as string;
+    const todoRes = await app.request(`/api/lists/${token}/todos`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "予算の親",
+        status: "todo",
+        priority: "low",
+      }),
+    });
+    todoId = ((await todoRes.json()) as { id: string }).id;
+    // 予算用の別TODOに、上限(100MiB)を超える合計を直接積む。TODO単位の
+    // 件数上限(50)に触れないよう、別TODOの行で帯域確保する。
+    const [budgetTodo] = (
+      await db.sql`
+        INSERT INTO public.todos (id, list_id, title, status, priority)
+        VALUES (${randomUUID()}, ${listId}, '予算用', 'todo', 'low')
+        RETURNING id
+      `
+    ).rows as Array<{ id: string }>;
+    // 70 × 1.5MiB = 105MiB > 100MiB。
+    await db.sql`
+      INSERT INTO public.attachments (
+        id, todo_id, memo_id, object_key, filename, content_type, size_bytes
+      )
+      SELECT
+        md5(random()::text || g::text)::uuid, ${budgetTodo.id}, NULL,
+        'attachments/budget-seed-' || g, 'budget.txt', 'text/plain',
+        1572864
+      FROM generate_series(1, 70) AS g
+    `;
+  });
+
+  const postTxt = (body: string) => {
+    const form = new FormData();
+    form.append("file", txtFile(body));
+    form.append("userId", userId);
+    return app.request(`/api/lists/${token}/todos/${todoId}/attachments`, {
+      method: "POST",
+      body: form,
+    });
+  };
+
+  it("合計バイト数が上限を超えるとTODO単位でもメモ経由でも400", async () => {
+    const res = await postTxt("予算超過");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "attachment storage budget exceeded",
+    });
+    const withMemo = new FormData();
+    withMemo.append("body", "載らない");
+    withMemo.append("file", txtFile());
+    withMemo.append("userId", userId);
+    const refused = await app.request(
+      `/api/lists/${token}/todos/${todoId}/memos/with-attachment`,
+      { method: "POST", body: withMemo },
+    );
+    expect(refused.status).toBe(400);
+    // 上限で書き込みを止めるため、ストレージには何も積まれない。
+    expect(storage.uploads).toHaveLength(0);
   });
 });

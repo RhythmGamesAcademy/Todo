@@ -8,7 +8,12 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export interface ObjectStorage {
   put(params: { key: string; contentType: string; body: Blob }): Promise<void>;
-  signedUrl(params: { key: string; contentType: string }): Promise<string>;
+  signedUrl(params: {
+    key: string;
+    contentType: string;
+    /** "attachment" はダウンロード強制(監査 M-001)。既定は inline。 */
+    contentDisposition?: "inline" | "attachment";
+  }): Promise<string>;
   delete(key: string): Promise<void>;
 }
 
@@ -52,9 +57,11 @@ export class S3ObjectStorage implements ObjectStorage {
   async signedUrl({
     key,
     contentType,
+    contentDisposition,
   }: {
     key: string;
     contentType: string;
+    contentDisposition?: "inline" | "attachment";
   }): Promise<string> {
     return getSignedUrl(
       this.client,
@@ -62,6 +69,11 @@ export class S3ObjectStorage implements ObjectStorage {
         Bucket: this.bucket,
         Key: key,
         ResponseContentType: contentType,
+        // ストレージ配信元はアプリの CSP 外のため、インライン表示が危険な
+        // 形式はダウンロードとして強制する。既定(未指定)は inline で、
+        // 画像・動画・テキストプレビューだけに使う。
+        ResponseContentDisposition:
+          contentDisposition === "attachment" ? "attachment" : undefined,
       }),
       { expiresIn: 900 },
     );
