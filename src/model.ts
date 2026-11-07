@@ -13,10 +13,11 @@ export const MAX_TAGS = 5;
 export const MAX_TAG_LENGTH = 20;
 /** プルダウンで選べるタグのテンプレート。末尾の申請は承認フローの特別タグ。 */
 export const TAG_TEMPLATES: readonly string[] = [
-  "仕事",
-  "急ぎ",
   "会議",
-  "買い物",
+  "UI",
+  "開発",
+  "企画",
+  "雑務",
   REQUEST_TAG,
 ];
 export interface Note {

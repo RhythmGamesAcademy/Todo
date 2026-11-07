@@ -156,10 +156,10 @@ describe("TodoForm のタグ選択", () => {
     const select = screen.getByRole("combobox", {
       name: messages.tags.selectLabel,
     });
-    fireEvent.change(select, { target: { value: "仕事" } });
-    expect(screen.getByText("仕事")).toBeTruthy();
+    fireEvent.change(select, { target: { value: "開発" } });
+    expect(screen.getByText("開発")).toBeTruthy();
     // 一度選ぶとチップが付き、選択肢から消える。
-    expect(within(select).queryByRole("option", { name: "仕事" })).toBeNull();
+    expect(within(select).queryByRole("option", { name: "開発" })).toBeNull();
     expect(
       within(select).getByRole("option", { name: "既存タグ" }),
     ).toBeTruthy();
