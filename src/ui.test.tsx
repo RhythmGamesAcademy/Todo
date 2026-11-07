@@ -1,17 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TodoCard, TodoForm } from "./ui";
 import { messages } from "./messages";
 import type { Todo } from "./model";
 
 afterEach(cleanup);
+
+// jsdom には ResizeObserver / scrollIntoView がなく、Headless UI が使うためスタブする。
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub;
+Element.prototype.scrollIntoView ??= () => {};
 
 const todo = (extra: Partial<Todo> = {}): Todo => ({
   id: "todo",
@@ -150,30 +154,37 @@ describe("TodoForm のタグ選択", () => {
         ask={async () => true}
       />,
     );
+  const openTags = async () => {
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: messages.tags.selectLabel }));
+    return screen.getByRole("listbox");
+  };
 
-  it("プルダウンからテンプレートタグを選ぶとチップが追加される", () => {
+  it("プルダウンからテンプレートタグを選ぶとチップが追加される", async () => {
     renderForm(["既存タグ"]);
-    const select = screen.getByRole("combobox", {
-      name: messages.tags.selectLabel,
-    });
-    fireEvent.change(select, { target: { value: "開発" } });
-    expect(screen.getByText("開発")).toBeTruthy();
-    // 一度選ぶとチップが付き、選択肢から消える。
-    expect(within(select).queryByRole("option", { name: "開発" })).toBeNull();
+    const listbox = await openTags();
+    expect(within(listbox).getByRole("option", { name: "開発" })).toBeTruthy();
     expect(
-      within(select).getByRole("option", { name: "既存タグ" }),
+      within(listbox).getByRole("option", { name: "既存タグ" }),
     ).toBeTruthy();
-    // 既に選んだテンプレートを再選択しても二重には付かない。
-    fireEvent.change(select, { target: { value: "仕事" } });
-    expect(within(select).queryByRole("option", { name: "仕事" })).toBeNull();
+    await userEvent
+      .setup()
+      .click(within(listbox).getByRole("option", { name: "開発" }));
+    expect(screen.getByText("開発")).toBeTruthy();
+    // 再度開くと既に追加したタグは選択肢から消える。
+    const reopened = await openTags();
+    expect(within(reopened).queryByRole("option", { name: "開発" })).toBeNull();
+    expect(
+      within(reopened).getByRole("option", { name: "既存タグ" }),
+    ).toBeTruthy();
   });
 
-  it("プルダウンには申請タグも選択肢に含まれる", () => {
+  it("プルダウンには申請タグも選択肢に含まれる", async () => {
     renderForm();
+    const listbox = await openTags();
     expect(
-      within(
-        screen.getByRole("combobox", { name: messages.tags.selectLabel }),
-      ).getByRole("option", { name: messages.approval.label }),
+      within(listbox).getByRole("option", { name: messages.approval.label }),
     ).toBeTruthy();
   });
 });

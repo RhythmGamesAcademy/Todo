@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   CheckCheck,
+  ChevronDown,
   Circle,
   ArrowUp,
   UserRound,
@@ -18,6 +19,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import {
+  Listbox,
+  ListboxButton,
+  ListboxOption,
+  ListboxOptions,
+} from "@headlessui/react";
 import {
   calendarUrl,
   dateText,
@@ -418,6 +425,9 @@ export function TodoForm({
       setSaving(false);
     }
   }
+  const tagOptions = [...TAG_TEMPLATES, ...tagSuggestions].filter(
+    (tag, index, all) => all.indexOf(tag) === index && !tags.includes(tag),
+  );
   return (
     <form onSubmit={submit} className="todo-form">
       <label className="field-label" htmlFor="todo-title">
@@ -591,29 +601,39 @@ export function TodoForm({
             ))}
           </ul>
         )}
-        <select
-          id="todo-tag-select"
-          className="field"
-          aria-label={messages.tags.selectLabel}
+        <Listbox
           value=""
-          onChange={(e) => {
-            const tag = e.target.value;
-            // 選択を解除しただけの場合は何もしない。
+          onChange={(tag) => {
             if (tag) commitTag(tag);
           }}
         >
-          <option value="" disabled>
-            {messages.tags.selectPlaceholder}
-          </option>
-          {[...TAG_TEMPLATES, ...tagSuggestions]
-            .filter((tag, index, all) => all.indexOf(tag) === index)
-            .filter((tag) => !tags.includes(tag))
-            .map((tag) => (
-              <option key={tag} value={tag}>
+          <ListboxButton
+            id="todo-tag-select"
+            className="tag-select-button"
+            aria-label={messages.tags.selectLabel}
+          >
+            <span>{messages.tags.selectPlaceholder}</span>
+            <ChevronDown size={16} className="tag-select-caret" />
+          </ListboxButton>
+          <ListboxOptions
+            transition
+            anchor="bottom start"
+            className="tag-select-options"
+          >
+            {tagOptions.map((tag) => (
+              <ListboxOption
+                key={tag}
+                value={tag}
+                className={({ focus }) =>
+                  "tag-select-option" +
+                  (focus ? " tag-select-option-focus" : "")
+                }
+              >
                 {tag}
-              </option>
+              </ListboxOption>
             ))}
-        </select>
+          </ListboxOptions>
+        </Listbox>
         <input
           id="todo-tags"
           list="todo-tag-suggestions"

@@ -2589,6 +2589,83 @@ input[type="checkbox"] {
   padding: 0;
   margin: 0;
 }
+
+/* タグのプルダウン(Headless UI Listbox) */
+.tag-select-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+  margin: 2px 0 10px;
+  border: 1px solid #dce4ef;
+  background: #fff;
+  color: #7f8da2;
+  border-radius: 11px;
+  padding: 10px 13px;
+  font-size: 14px;
+  min-height: 45px;
+  transition: border-color 0.15s ease;
+}
+.tag-select-button:hover:not(:disabled) {
+  border-color: #aebfd8;
+}
+.tag-select-button:focus {
+  border-color: #78aaf5;
+  outline: none;
+}
+.tag-select-button:active:not(:disabled) {
+  background: #f4f8fd;
+}
+.tag-select-caret {
+  color: #96a4b8;
+  flex: none;
+  transition: transform 0.2s ease;
+}
+.tag-select-button[data-open] .tag-select-caret {
+  transform: rotate(180deg);
+}
+.tag-select-options {
+  width: var(--button-width, 100%);
+  min-width: 220px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 40;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #dce4ef;
+  border-radius: 12px;
+  box-shadow: 0 14px 30px rgba(46, 71, 105, 0.16);
+  transform-origin: top;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+.tag-select-options[data-leave] {
+  transition-duration: 0.12s;
+}
+.tag-select-options[data-closed] {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.tag-select-option {
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #2e4769;
+  cursor: pointer;
+}
+.tag-select-option-focus {
+  background: #eef3fa;
+}
+.tag-select-none {
+  margin: 0;
+  padding: 10px 11px;
+  font-size: 13px;
+  color: #96a4b8;
+}
+
 .tag-chips {
   list-style: none;
   margin: 0 0 8px;
