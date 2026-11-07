@@ -28,6 +28,7 @@ import {
   PRIORITY,
   REQUEST_TAG,
   STATUS,
+  TAG_TEMPLATES,
   toDateInput,
 } from "./model";
 import type {
@@ -590,6 +591,29 @@ export function TodoForm({
             ))}
           </ul>
         )}
+        <select
+          id="todo-tag-select"
+          className="field"
+          aria-label={messages.tags.selectLabel}
+          value=""
+          onChange={(e) => {
+            const tag = e.target.value;
+            // 選択を解除しただけの場合は何もしない。
+            if (tag) commitTag(tag);
+          }}
+        >
+          <option value="" disabled>
+            {messages.tags.selectPlaceholder}
+          </option>
+          {[...TAG_TEMPLATES, ...tagSuggestions]
+            .filter((tag, index, all) => all.indexOf(tag) === index)
+            .filter((tag) => !tags.includes(tag))
+            .map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+        </select>
         <input
           id="todo-tags"
           list="todo-tag-suggestions"

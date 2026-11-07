@@ -151,6 +151,8 @@ export const messages = {
   tags: {
     label: "タグ",
     input: "タグを入力してEnterで追加",
+    selectLabel: "テンプレートからタグを選択",
+    selectPlaceholder: "タグを選択して追加",
     removeLabel: (tag: string) => tag + "を削除",
     suggestionLabel: "タグの候補",
     max: (count: number) => count + " / 5",

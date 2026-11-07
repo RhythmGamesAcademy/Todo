@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
-import { TodoCard } from "./ui";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { TodoCard, TodoForm } from "./ui";
 import { messages } from "./messages";
 import type { Todo } from "./model";
+
+afterEach(cleanup);
 
 const todo = (extra: Partial<Todo> = {}): Todo => ({
   id: "todo",
@@ -127,5 +135,45 @@ describe("TodoCard", () => {
     );
     expect(plain.queryByText(messages.approval.pending)).toBeNull();
     expect(plain.queryByLabelText(messages.tags.label)).toBeNull();
+  });
+});
+
+describe("TodoForm のタグ選択", () => {
+  const renderForm = (tagSuggestions: string[] = []) =>
+    render(
+      <TodoForm
+        users={[]}
+        tagSuggestions={tagSuggestions}
+        onSave={async () => true}
+        onCancel={() => {}}
+        onDirty={() => {}}
+        ask={async () => true}
+      />,
+    );
+
+  it("プルダウンからテンプレートタグを選ぶとチップが追加される", () => {
+    renderForm(["既存タグ"]);
+    const select = screen.getByRole("combobox", {
+      name: messages.tags.selectLabel,
+    });
+    fireEvent.change(select, { target: { value: "仕事" } });
+    expect(screen.getByText("仕事")).toBeTruthy();
+    // 一度選ぶとチップが付き、選択肢から消える。
+    expect(within(select).queryByRole("option", { name: "仕事" })).toBeNull();
+    expect(
+      within(select).getByRole("option", { name: "既存タグ" }),
+    ).toBeTruthy();
+    // 既に選んだテンプレートを再選択しても二重には付かない。
+    fireEvent.change(select, { target: { value: "仕事" } });
+    expect(within(select).queryByRole("option", { name: "仕事" })).toBeNull();
+  });
+
+  it("プルダウンには申請タグも選択肢に含まれる", () => {
+    renderForm();
+    expect(
+      within(
+        screen.getByRole("combobox", { name: messages.tags.selectLabel }),
+      ).getByRole("option", { name: messages.approval.label }),
+    ).toBeTruthy();
   });
 });
