@@ -523,7 +523,8 @@ describe("利用者の操作", () => {
         title: "資料を確認する",
         status: "todo",
         priority: "high",
-        deadline: "2026-10-29T01:00:00.000Z",
+        // UIと同じくローカル時刻→UTC変換されるため、ランナーのTZに依存しない。
+        deadline: new Date("2026-10-29T10:00").toISOString(),
       }),
     );
     const row = () =>
@@ -575,7 +576,8 @@ describe("利用者の操作", () => {
         title: "資料を確認する（改）",
         status: "done",
         priority: "high",
-        deadline: "2026-10-29T01:00:00.000Z",
+        // 追加時に決まった瞬間をそのまま保存するため、TZに依存しない。
+        deadline: new Date("2026-10-29T10:00").toISOString(),
       }),
     );
     await user.click(
