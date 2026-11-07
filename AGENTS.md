@@ -2,6 +2,7 @@
 
 ## Project Structure & Module Organization
 
+You MUST read `docs/engineering/architecture.md` before making any changes to this project.
 This is a React 19, TypeScript, Vite, and Tailwind CSS TODO application. `src/App.tsx` coordinates screens; `src/ui.tsx` contains shared UI; `src/model.ts` handles domain rules and serialization; `src/storage.ts` manages localStorage. Backup and restore controls live in `src/DataPanel.tsx`. Keep completion animation logic in `src/completion/` and navigation in `src/components/`.
 
 Tests sit beside their modules as `*.test.ts` or `*.test.tsx`. Static assets belong in `public/`. `dist/` is generated, and `artifacts/` is ignored scratch space. CI runs tests and the production build in `.github/workflows/ci.yml` for PRs to `main` and direct pushes to `main`.
