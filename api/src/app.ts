@@ -224,6 +224,13 @@ const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
 // 取得コスト(帯域・ Neon の行スキャン)がリクエストごとに増大する。
 const ACTIVITY_LIMIT = 500;
 const NOTIFICATION_LIMIT = 100;
+// 行数の無制限増大を防ぐ上限(監査 2026-11-08 M-004)。添付の件数・バイト上限と
+// 同様に、トークン保持者による書き込み総量を際限なく増やせないようにする。
+// ソフト削除済みのTODOは復元で戻せるため、TODO数の計数からは除外する。
+export const MAX_TODOS_PER_LIST = 300;
+export const MAX_SUBTASKS_PER_TODO = 50;
+export const MAX_MEMOS_PER_TODO = 200;
+export const MAX_SUBTASK_MEMOS_PER_SUBTASK = 200;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 // UUID 以外の文字列を uuid 列と比較すると Postgres が 22P02 で落ちるため、
@@ -331,6 +338,21 @@ export function createApp({
   app.use(
     "/api/lists/:token/todos/:todoId/memos/:memoId/attachments",
     perToken("upload", 120),
+  );
+  // 行作成も短期集中の上限を置く(監査 2026-11-08 M-004)。
+  app.use("/api/lists/:token/todos", perToken("todo-create", 120));
+  app.use(
+    "/api/lists/:token/todos/:todoId/subtasks",
+    perToken("subtask-create", 120),
+  );
+  app.use("/api/lists/:token/todos/:id/memos", perToken("memo-create", 120));
+  app.use(
+    "/api/lists/:token/todos/:todoId/memos/with-attachment",
+    perToken("memo-create", 120),
+  );
+  app.use(
+    "/api/lists/:token/todos/:todoId/subtasks/:subtaskId/memos",
+    perToken("memo-create", 120),
   );
 
   const findList = async (token: string): Promise<ListRow | null> => {
@@ -519,6 +541,46 @@ export function createApp({
     if (Number(row?.total ?? 0) + incomingBytes > MAX_LIST_STORAGE_BYTES)
       throw new ApiException(400, "attachment storage budget exceeded");
   };
+
+  // 行数の上限確認。添付の assertAttachmentLimit と同じく、INSERT の前に
+  // count(*) を確かめて超過は 400 に寄せる(監査 2026-11-08 M-004)。
+  const assertRowCount = async (
+    max: number,
+    resource: string,
+    countQuery: SqlCall,
+  ): Promise<void> => {
+    const [row] = rowsOf<{ count: number }>(await countQuery);
+    if ((row?.count ?? 0) >= max)
+      throw new ApiException(400, `${resource} limit reached`);
+  };
+
+  const assertTodoLimit = (listId: string): Promise<void> =>
+    assertRowCount(
+      MAX_TODOS_PER_LIST,
+      "todo",
+      sql`SELECT count(*)::int AS count FROM public.todos WHERE list_id = ${listId} AND deleted_at IS NULL`,
+    );
+
+  const assertSubtaskLimit = (todoId: string): Promise<void> =>
+    assertRowCount(
+      MAX_SUBTASKS_PER_TODO,
+      "subtask",
+      sql`SELECT count(*)::int AS count FROM public.subtasks WHERE todo_id = ${todoId}`,
+    );
+
+  const assertMemoLimit = (todoId: string): Promise<void> =>
+    assertRowCount(
+      MAX_MEMOS_PER_TODO,
+      "memo",
+      sql`SELECT count(*)::int AS count FROM public.memos WHERE todo_id = ${todoId}`,
+    );
+
+  const assertSubtaskMemoLimit = (subtaskId: string): Promise<void> =>
+    assertRowCount(
+      MAX_SUBTASK_MEMOS_PER_SUBTASK,
+      "subtask memo",
+      sql`SELECT count(*)::int AS count FROM public.subtask_memos WHERE subtask_id = ${subtaskId}`,
+    );
 
   /** オブジェクトストレージへの保存とNeonへの登録。 */
   const uploadAndRegister = async (params: {
@@ -845,6 +907,7 @@ export function createApp({
   app.post("/api/lists/:token/todos", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
+    await assertTodoLimit(list.id);
     const body = await readJson(c);
 
     const title = assertText(body.title, 120, "title");
@@ -1177,6 +1240,7 @@ export function createApp({
     if (!list) return notFound(c);
     const row = await findTodo(list.id, c.req.param("id"));
     if (!row || row.deleted_at !== null) return notFound(c);
+    await assertMemoLimit(row.id);
     const body = await readJson(c);
 
     const text = assertText(body.body, 2000, "body");
@@ -1257,6 +1321,7 @@ export function createApp({
           throw new ApiException(400, "body must be at most 2000 characters");
         const verified = await extractVerifiedFile(form);
         const memoId = randomUUID();
+        await assertMemoLimit(todo.id);
         await assertAttachmentLimit(todo.id);
         await assertListStorageBudget(list.id, verified.file.size);
         const attachmentId = randomUUID();
@@ -1390,6 +1455,7 @@ export function createApp({
     if (!list) return notFound(c);
     const todo = await findTodo(list.id, c.req.param("todoId"));
     if (!todo || todo.deleted_at !== null) return notFound(c);
+    await assertSubtaskLimit(todo.id);
     const body = await readJson(c);
 
     const title = assertText(body.title, 120, "title");
@@ -1487,6 +1553,7 @@ export function createApp({
       if (!todo || todo.deleted_at !== null) return notFound(c);
       const subtask = await findSubtask(todo.id, c.req.param("subtaskId"));
       if (!subtask) return notFound(c);
+      await assertSubtaskMemoLimit(subtask.id);
       const body = await readJson(c);
 
       const text = assertText(body.body, 2000, "body");
