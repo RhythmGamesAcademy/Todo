@@ -6,6 +6,7 @@ import {
   MAX_TODOS_PER_LIST,
   createApp,
 } from "./app";
+import type { ObjectStorage } from "./object-storage";
 import type { Sql, Transact } from "./sql";
 
 // DB なしで上限ロジックを検証するためのスタブ。TEST_DATABASE_URL が無い環境
@@ -79,6 +80,10 @@ const makeStubDb = (counts: RowCounts) => {
       return Promise.resolve(result([{ count: counts.memos }]));
     if (text.includes("count(*)") && text.includes("FROM public.subtask_memos"))
       return Promise.resolve(result([{ count: counts.subtaskMemos }]));
+    if (text.includes("count(*)") && text.includes("FROM public.attachments"))
+      return Promise.resolve(result([{ count: 0 }]));
+    if (text.includes("coalesce(sum(a.size_bytes), 0)"))
+      return Promise.resolve(result([{ total: 0 }]));
     if (text.includes("FROM public.todos WHERE id"))
       return Promise.resolve(result([todoRow()]));
     if (text.includes("FROM public.subtasks WHERE id"))
@@ -105,6 +110,23 @@ const postJson = (
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+
+const makeMultipartMemo = (): FormData => {
+  const pngBytes = new ArrayBuffer(8);
+  new Uint8Array(pngBytes).set([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
+  const form = new FormData();
+  form.append("body", "添付付きメモ");
+  form.append("file", new Blob([pngBytes], { type: "image/png" }), "memo.png");
+  return form;
+};
+
+const makeObjectStorage = (put: ObjectStorage["put"]): ObjectStorage => ({
+  put,
+  delete: async () => {},
+  signedUrl: async () => "https://example.invalid/signed",
+});
 
 const TODO_BODY = {
   title: "タイトル",
@@ -143,6 +165,23 @@ describe("行数上限(監査 M-004)", () => {
     expect(res.status).toBe(201);
   });
 
+  it("サブタスク数が上限未満ならサブタスク作成は201になる", async () => {
+    const app = createApp(
+      makeStubDb({
+        todos: 0,
+        subtasks: MAX_SUBTASKS_PER_TODO - 1,
+        memos: 0,
+        subtaskMemos: 0,
+      }),
+    );
+    const res = await postJson(
+      app,
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/subtasks`,
+      { title: "サブタスク", status: "todo", priority: "medium" },
+    );
+    expect(res.status).toBe(201);
+  });
+
   it("サブタスク数が上限に達したTODOではサブタスク作成が400になる", async () => {
     const app = createApp(
       makeStubDb({
@@ -161,6 +200,23 @@ describe("行数上限(監査 M-004)", () => {
     await expect(res.json()).resolves.toMatchObject({
       error: "subtask limit reached",
     });
+  });
+
+  it("TODOメモ数が上限未満ならメモ作成は201になる", async () => {
+    const app = createApp(
+      makeStubDb({
+        todos: 0,
+        subtasks: 0,
+        memos: MAX_MEMOS_PER_TODO - 1,
+        subtaskMemos: 0,
+      }),
+    );
+    const res = await postJson(
+      app,
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/memos`,
+      { body: "メモ" },
+    );
+    expect(res.status).toBe(201);
   });
 
   it("TODOメモ数が上限に達したTODOではメモ作成が400になる", async () => {
@@ -185,6 +241,23 @@ describe("行数上限(監査 M-004)", () => {
     });
   });
 
+  it("サブタスクメモ数が上限未満ならサブタスクメモ作成は201になる", async () => {
+    const app = createApp(
+      makeStubDb({
+        todos: 0,
+        subtasks: 0,
+        memos: 0,
+        subtaskMemos: MAX_SUBTASK_MEMOS_PER_SUBTASK - 1,
+      }),
+    );
+    const res = await postJson(
+      app,
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/subtasks/${SUBTASK_ID}/memos`,
+      { body: "メモ" },
+    );
+    expect(res.status).toBe(201);
+  });
+
   it("サブタスクメモ数が上限に達するとサブタスクメモ作成が400になる", async () => {
     const app = createApp(
       makeStubDb({
@@ -203,6 +276,53 @@ describe("行数上限(監査 M-004)", () => {
     await expect(res.json()).resolves.toMatchObject({
       error: "subtask memo limit reached",
     });
+  });
+
+  it("添付付きメモはメモ数上限到達時に拒否されストレージへ保存しない", async () => {
+    let putCalls = 0;
+    const db = makeStubDb({
+      todos: 0,
+      subtasks: 0,
+      memos: MAX_MEMOS_PER_TODO,
+      subtaskMemos: 0,
+    });
+    const app = createApp({
+      ...db,
+      objectStorage: makeObjectStorage(async () => {
+        putCalls += 1;
+      }),
+    });
+    const res = await app.request(
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/memos/with-attachment`,
+      { method: "POST", body: makeMultipartMemo() },
+    );
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "memo limit reached",
+    });
+    expect(putCalls).toBe(0);
+  });
+
+  it("添付付きメモは上限未満なら201になりストレージへ1回保存する", async () => {
+    const uploadedContentTypes: string[] = [];
+    const db = makeStubDb({
+      todos: 0,
+      subtasks: 0,
+      memos: MAX_MEMOS_PER_TODO - 1,
+      subtaskMemos: 0,
+    });
+    const app = createApp({
+      ...db,
+      objectStorage: makeObjectStorage(async ({ contentType }) => {
+        uploadedContentTypes.push(contentType);
+      }),
+    });
+    const res = await app.request(
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/memos/with-attachment`,
+      { method: "POST", body: makeMultipartMemo() },
+    );
+    expect(res.status).toBe(201);
+    expect(uploadedContentTypes).toEqual(["image/png"]);
   });
 });
 
