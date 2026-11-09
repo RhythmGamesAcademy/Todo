@@ -8,7 +8,7 @@ import {
   generateToken,
   parseTags,
   toPgTextArray,
-} from "./domain";
+} from "../../api/src/domain";
 
 describe("generateToken", () => {
   it("43文字のbase64urlを生成し、呼ぶたびに異なる", () => {

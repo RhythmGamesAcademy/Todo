@@ -3,7 +3,7 @@ import {
   AttachmentValidationError,
   MAX_FILE_SIZE_BYTES,
   verifyAttachment,
-} from "./attachment.js";
+} from "../../api/src/attachment.js";
 
 const buildFile = (
   name: string,
@@ -116,7 +116,11 @@ describe("添付ファイルの検証", () => {
       verifyAttachment("d.txt", "text/plain", buildFile("d.txt", utf8("メモ"))),
     ).resolves.toMatchObject({ contentType: "text/plain", category: "text" });
     await expect(
-      verifyAttachment("b.md", "text/markdown", buildFile("b.md", utf8("# 案"))),
+      verifyAttachment(
+        "b.md",
+        "text/markdown",
+        buildFile("b.md", utf8("# 案")),
+      ),
     ).resolves.toMatchObject({ category: "text" });
     await expect(
       verifyAttachment(
@@ -173,11 +177,7 @@ describe("添付ファイルの検証", () => {
       category: "file",
     });
     await expect(
-      verifyAttachment(
-        "noext",
-        "image/png",
-        buildFile("noext", PNG_HEADER),
-      ),
+      verifyAttachment("noext", "image/png", buildFile("noext", PNG_HEADER)),
     ).resolves.toMatchObject({ contentType: "image/png", category: "file" });
     // 危険な表示になり得る宣言は無害なフォールバックへ寄せる。
     await expect(
