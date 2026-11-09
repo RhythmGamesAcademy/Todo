@@ -113,6 +113,17 @@ Afferent/Efferent 数は `map_codebase.py` の `modules` 出力からの転記�
 - 公開面: 静的 SPA 全体(base"./"、vercel.json)、および `/api/*`(vercel.json:2)。API v1 は bearer 等の認証ヘッダをもたず、対象リストはパスの token、userId は本文の申告値で、その扱いは client.ts:21-22 のコメントに明記(server 側は app.ts のルート定義で処理、本パスでは確認未了)。
 - ヘッダ/配信: vercel.json:9 の CSP(`connect-src 'self' https://*.neon.tech`)、ストレージの inline 配信は危険な形式を `attachment` に強制(object-storage.ts:72-76、attachment.ts の `isInlineRenderable`)。
 
+## セキュリティ上の受け入れリスク
+
+設計判断として現状受け入れているリスク。いずれも API v1 の制約に由来する。
+
+- 共有トークンが唯一の認証要素: トークンは `randomBytes(32)` の base64url(32バイト、api/src/domain.ts:25-27)で、パスの token が対象リストを特定する。リスト内の全操作(リスト削除を含む)がこのトークンのみで実行でき、招待リンクは共有 URL(`#token=`)として経由し続ける。トークン失効・ローテーション API は未提供のため、流出時はリスト削除での対応になる。トークン再発行エンドポイントの追加は将来の課題。
+- `userId` のクライアント任意送信: API v1 には認証済み呼び出し元の概念がなく、`userId` はリクエスト本文の申告値(client.ts:21-22)。トークン保持者はリスト内メンバーとしての帰属(変更履歴・通知)を偽装できる。server-side セッションの導入時に解消予定。
+- セッショントークンの localStorage 保存: セッション(token/userId/name)は localStorage `hitotsuzutsu.session.v1` に保存され(src/cloud/session.ts:1-7)、XSS が成立すると露出する。CSP `script-src 'self'`(vercel.json:9)で外部スクリプト実行を絞ることで緩和している。
+- CSP の `style-src 'unsafe-inline'`: React のインラインスタイル利用に必要なため許可している(vercel.json:9)。
+
+詳細は監査レポート `security-audit-report-2026-11-08.md`(L-006/L-007)を参照。レポートファイル自体は .gitignore 済みのためリポジトリには含めない。
+
 ## Observations
 
 - (root files) と cloud が互いに import する(script modules 出力: (root files) imports cloud、cloud imports (root files))。cloud の api 依存は型 import のみ(api/src/app.ts:4-23 が src/model と src/cloud/types の型を import、module 出力では api → cloud)。

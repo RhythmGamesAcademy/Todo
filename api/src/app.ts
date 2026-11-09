@@ -39,12 +39,13 @@ import {
   verifyAttachment,
 } from "./attachment.js";
 import type { ObjectStorage } from "./object-storage.js";
-import type { DbInfo, Sql, SqlCall, Transact } from "./sql.js";
+import type { DbInfo, Sql, SqlCall, Transact, TransactGuarded } from "./sql.js";
 import { rateLimit, clientIp } from "./rate-limit.js";
 
 export interface AppDeps {
   sql: Sql;
   transact: Transact;
+  transactGuarded: TransactGuarded;
   describe?: () => Promise<DbInfo>;
   objectStorage?: ObjectStorage;
 }
@@ -224,6 +225,13 @@ const PRIORITIES: readonly Priority[] = ["high", "medium", "low"];
 // 取得コスト(帯域・ Neon の行スキャン)がリクエストごとに増大する。
 const ACTIVITY_LIMIT = 500;
 const NOTIFICATION_LIMIT = 100;
+// 行数の無制限増大を防ぐ上限(監査 2026-11-08 M-004)。添付の件数・バイト上限と
+// 同様に、トークン保持者による書き込み総量を際限なく増やせないようにする。
+// ソフト削除済みのTODOは復元で戻せるため、TODO数の計数からは除外する。
+export const MAX_TODOS_PER_LIST = 300;
+export const MAX_SUBTASKS_PER_TODO = 50;
+export const MAX_MEMOS_PER_TODO = 200;
+export const MAX_SUBTASK_MEMOS_PER_SUBTASK = 200;
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 // UUID 以外の文字列を uuid 列と比較すると Postgres が 22P02 で落ちるため、
@@ -298,6 +306,7 @@ async function readOptionalJson(c: Context): Promise<Record<string, unknown>> {
 export function createApp({
   sql,
   transact,
+  transactGuarded,
   describe,
   objectStorage,
 }: AppDeps): Hono {
@@ -331,6 +340,21 @@ export function createApp({
   app.use(
     "/api/lists/:token/todos/:todoId/memos/:memoId/attachments",
     perToken("upload", 120),
+  );
+  // 行作成も短期集中の上限を置く(監査 2026-11-08 M-004)。
+  app.use("/api/lists/:token/todos", perToken("todo-create", 120));
+  app.use(
+    "/api/lists/:token/todos/:todoId/subtasks",
+    perToken("subtask-create", 120),
+  );
+  app.use("/api/lists/:token/todos/:id/memos", perToken("memo-create", 120));
+  app.use(
+    "/api/lists/:token/todos/:todoId/memos/with-attachment",
+    perToken("memo-create", 120),
+  );
+  app.use(
+    "/api/lists/:token/todos/:todoId/subtasks/:subtaskId/memos",
+    perToken("memo-create", 120),
   );
 
   const findList = async (token: string): Promise<ListRow | null> => {
@@ -520,6 +544,56 @@ export function createApp({
       throw new ApiException(400, "attachment storage budget exceeded");
   };
 
+  // 事前確認は早いエラー応答や外部ストレージ副作用の回避用。
+  // 実際の上限保証は advisory lock 下のトランザクション内 INSERT/UPDATE が担う。
+  const assertRowCount = async (
+    max: number,
+    resource: string,
+    countQuery: SqlCall,
+  ): Promise<void> => {
+    const [row] = rowsOf<{ count: number }>(await countQuery);
+    if ((row?.count ?? 0) >= max)
+      throw new ApiException(400, `${resource} limit reached`);
+  };
+
+  const assertTodoLimit = (listId: string): Promise<void> =>
+    assertRowCount(
+      MAX_TODOS_PER_LIST,
+      "todo",
+      sql`SELECT count(*)::int AS count FROM public.todos WHERE list_id = ${listId} AND deleted_at IS NULL`,
+    );
+
+  const assertSubtaskLimit = (todoId: string): Promise<void> =>
+    assertRowCount(
+      MAX_SUBTASKS_PER_TODO,
+      "subtask",
+      sql`SELECT count(*)::int AS count FROM public.subtasks WHERE todo_id = ${todoId}`,
+    );
+
+  const assertMemoLimit = (todoId: string): Promise<void> =>
+    assertRowCount(
+      MAX_MEMOS_PER_TODO,
+      "memo",
+      sql`SELECT count(*)::int AS count FROM public.memos WHERE todo_id = ${todoId}`,
+    );
+
+  const assertSubtaskMemoLimit = (subtaskId: string): Promise<void> =>
+    assertRowCount(
+      MAX_SUBTASK_MEMOS_PER_SUBTASK,
+      "subtask memo",
+      sql`SELECT count(*)::int AS count FROM public.subtask_memos WHERE subtask_id = ${subtaskId}`,
+    );
+
+  const transactWithinRowLimit = async (
+    lockKey: string,
+    statements: SqlCall[],
+    guardedStatementIndex: number,
+    resource: string,
+  ): Promise<void> => {
+    if (!(await transactGuarded(lockKey, statements, guardedStatementIndex)))
+      throw new ApiException(400, `${resource} limit reached`);
+  };
+
   /** オブジェクトストレージへの保存とNeonへの登録。 */
   const uploadAndRegister = async (params: {
     listId: string;
@@ -575,11 +649,13 @@ export function createApp({
         object_key,
         filename, content_type, size_bytes, created_by, created_at
       )
-      VALUES (
+      SELECT
         ${params.attachmentId}, ${params.todoId}, ${params.memoId},
         ${params.objectKey},
         ${params.filename}, ${params.contentType}, ${params.sizeBytes},
         ${params.userId}, clock_timestamp()
+      WHERE ${params.memoId === null} OR EXISTS (
+        SELECT 1 FROM public.memos WHERE id = ${params.memoId}
       )
     `;
 
@@ -845,6 +921,7 @@ export function createApp({
   app.post("/api/lists/:token/todos", async (c) => {
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
+    await assertTodoLimit(list.id);
     const body = await readJson(c);
 
     const title = assertText(body.title, 120, "title");
@@ -864,25 +941,25 @@ export function createApp({
     const statements = [
       sql`
         INSERT INTO public.todos (id, list_id, title, description, status, priority, due, assignee_ids, tags, approval_status)
-        VALUES (${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${toPgTextArray(assigneeIds)}::uuid[], ${toPgTextArray(tags)}::text[], ${approvalStatus})
+        SELECT ${id}, ${list.id}, ${title}, ${description}, ${status}, ${priority}, ${deadline}, ${toPgTextArray(assigneeIds)}::uuid[], ${toPgTextArray(tags)}::text[], ${approvalStatus}
+        WHERE (SELECT count(*) FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL) < ${MAX_TODOS_PER_LIST}
       `,
-      addActivity(list.id, id, userId, "todo.created", null, null, title),
+      sql`
+        INSERT INTO public.activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+        SELECT ${randomUUID()}, ${list.id}, ${id}, ${userId}, 'todo.created', NULL, NULL, ${title}, clock_timestamp()
+        WHERE EXISTS (SELECT 1 FROM public.todos WHERE id = ${id})
+      `,
     ];
     // 担当者を設定して作った場合だけ、担当者に作成通知を積む。
     if (userId !== null)
       for (const assigneeId of assigneeIds)
         if (assigneeId !== userId)
-          statements.push(
-            addNotification(
-              list.id,
-              id,
-              assigneeId,
-              userId,
-              "todo.assigned",
-              title,
-            ),
-          );
-    await transact(statements);
+          statements.push(sql`
+            INSERT INTO public.notifications (id, list_id, user_id, actor_id, todo_id, kind, body)
+            SELECT ${randomUUID()}, ${list.id}, ${assigneeId}, ${userId}, ${id}, 'todo.assigned', ${title}
+            WHERE EXISTS (SELECT 1 FROM public.todos WHERE id = ${id})
+          `);
+    await transactWithinRowLimit(list.id, statements, 0, "todo");
     return c.json({ id }, 201);
   });
 
@@ -1153,22 +1230,25 @@ export function createApp({
 
     if (row.deleted_at === null)
       return c.json({ revision: await readRevision(list.id) });
+    await assertTodoLimit(list.id);
 
-    await transact([
-      sql`
-        UPDATE public.todos SET deleted_at = NULL, updated_at = now()
-        WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NOT NULL
-      `,
-      addActivity(
-        list.id,
-        row.id,
-        userId,
-        "todo.restored",
-        null,
-        row.title,
-        null,
-      ),
-    ]);
+    await transactWithinRowLimit(
+      list.id,
+      [
+        sql`
+          UPDATE public.todos SET deleted_at = NULL, updated_at = now()
+          WHERE id = ${row.id} AND list_id = ${list.id} AND deleted_at IS NOT NULL
+            AND (SELECT count(*) FROM public.todos WHERE list_id = ${list.id} AND deleted_at IS NULL) < ${MAX_TODOS_PER_LIST}
+        `,
+        sql`
+          INSERT INTO public.activities (id, list_id, todo_id, user_id, kind, field, before, after, created_at)
+          SELECT ${randomUUID()}, ${list.id}, ${row.id}, ${userId}, 'todo.restored', NULL, ${row.title}, NULL, clock_timestamp()
+          WHERE EXISTS (SELECT 1 FROM public.todos WHERE id = ${row.id} AND deleted_at IS NULL)
+        `,
+      ],
+      0,
+      "todo",
+    );
     return c.json({ revision: await readRevision(list.id) });
   });
 
@@ -1177,6 +1257,7 @@ export function createApp({
     if (!list) return notFound(c);
     const row = await findTodo(list.id, c.req.param("id"));
     if (!row || row.deleted_at !== null) return notFound(c);
+    await assertMemoLimit(row.id);
     const body = await readJson(c);
 
     const text = assertText(body.body, 2000, "body");
@@ -1189,15 +1270,25 @@ export function createApp({
         : await sql`SELECT id, name FROM public.users WHERE list_id = ${list.id} AND id <> ${userId}`,
     );
     const mentioned = extractMentions(text, mentionCandidates);
-    await transact([
-      sql`
-        INSERT INTO public.memos (id, todo_id, user_id, body)
-        VALUES (${id}, ${row.id}, ${userId}, ${text})
-      `,
-      ...mentioned.map((mentionedId) =>
-        addNotification(list.id, row.id, mentionedId, userId, "mention", text),
-      ),
-    ]);
+    await transactWithinRowLimit(
+      row.id,
+      [
+        sql`
+          INSERT INTO public.memos (id, todo_id, user_id, body)
+          SELECT ${id}, ${row.id}, ${userId}, ${text}
+          WHERE (SELECT count(*) FROM public.memos WHERE todo_id = ${row.id}) < ${MAX_MEMOS_PER_TODO}
+        `,
+        ...mentioned.map(
+          (mentionedId) => sql`
+          INSERT INTO public.notifications (id, list_id, user_id, actor_id, todo_id, kind, body)
+          SELECT ${randomUUID()}, ${list.id}, ${mentionedId}, ${userId}, ${row.id}, 'mention', ${text}
+          WHERE EXISTS (SELECT 1 FROM public.memos WHERE id = ${id})
+        `,
+        ),
+      ],
+      0,
+      "memo",
+    );
     return c.json({ id }, 201);
   });
 
@@ -1257,6 +1348,7 @@ export function createApp({
           throw new ApiException(400, "body must be at most 2000 characters");
         const verified = await extractVerifiedFile(form);
         const memoId = randomUUID();
+        await assertMemoLimit(todo.id);
         await assertAttachmentLimit(todo.id);
         await assertListStorageBudget(list.id, verified.file.size);
         const attachmentId = randomUUID();
@@ -1275,32 +1367,35 @@ export function createApp({
           body: verified.file,
         });
         try {
-          await transact([
-            sql`
-              INSERT INTO public.memos (id, todo_id, user_id, body)
-              VALUES (${memoId}, ${todo.id}, ${userId}, ${text})
-            `,
-            insertAttachment({
-              attachmentId,
-              todoId: todo.id,
-              memoId,
-              userId,
-              filename: verified.filename,
-              contentType: verified.contentType,
-              sizeBytes: verified.file.size,
-              objectKey,
-            }),
-            ...mentioned.map((mentionedId) =>
-              addNotification(
-                list.id,
-                todo.id,
-                mentionedId,
+          await transactWithinRowLimit(
+            todo.id,
+            [
+              sql`
+                INSERT INTO public.memos (id, todo_id, user_id, body)
+                SELECT ${memoId}, ${todo.id}, ${userId}, ${text}
+                WHERE (SELECT count(*) FROM public.memos WHERE todo_id = ${todo.id}) < ${MAX_MEMOS_PER_TODO}
+              `,
+              insertAttachment({
+                attachmentId,
+                todoId: todo.id,
+                memoId,
                 userId,
-                "mention",
-                text,
+                filename: verified.filename,
+                contentType: verified.contentType,
+                sizeBytes: verified.file.size,
+                objectKey,
+              }),
+              ...mentioned.map(
+                (mentionedId) => sql`
+              INSERT INTO public.notifications (id, list_id, user_id, actor_id, todo_id, kind, body)
+              SELECT ${randomUUID()}, ${list.id}, ${mentionedId}, ${userId}, ${todo.id}, 'mention', ${text}
+              WHERE EXISTS (SELECT 1 FROM public.memos WHERE id = ${memoId})
+            `,
               ),
-            ),
-          ]);
+            ],
+            0,
+            "memo",
+          );
         } catch (error) {
           await storage.delete(objectKey).catch(() => {});
           throw error;
@@ -1390,6 +1485,7 @@ export function createApp({
     if (!list) return notFound(c);
     const todo = await findTodo(list.id, c.req.param("todoId"));
     if (!todo || todo.deleted_at !== null) return notFound(c);
+    await assertSubtaskLimit(todo.id);
     const body = await readJson(c);
 
     const title = assertText(body.title, 120, "title");
@@ -1400,12 +1496,18 @@ export function createApp({
     await readOptionalUserId(body, list.id);
 
     const id = randomUUID();
-    await transact([
-      sql`
+    await transactWithinRowLimit(
+      todo.id,
+      [
+        sql`
         INSERT INTO public.subtasks (id, todo_id, title, status, priority, due)
-        VALUES (${id}, ${todo.id}, ${title}, ${status}, ${priority}, ${deadline})
+        SELECT ${id}, ${todo.id}, ${title}, ${status}, ${priority}, ${deadline}
+        WHERE (SELECT count(*) FROM public.subtasks WHERE todo_id = ${todo.id}) < ${MAX_SUBTASKS_PER_TODO}
       `,
-    ]);
+      ],
+      0,
+      "subtask",
+    );
     return c.json({ id }, 201);
   });
 
@@ -1487,15 +1589,24 @@ export function createApp({
       if (!todo || todo.deleted_at !== null) return notFound(c);
       const subtask = await findSubtask(todo.id, c.req.param("subtaskId"));
       if (!subtask) return notFound(c);
+      await assertSubtaskMemoLimit(subtask.id);
       const body = await readJson(c);
 
       const text = assertText(body.body, 2000, "body");
       await readOptionalUserId(body, list.id);
       const id = randomUUID();
-      await sql`
-        INSERT INTO public.subtask_memos (id, subtask_id, body)
-        VALUES (${id}, ${subtask.id}, ${text})
-      `;
+      await transactWithinRowLimit(
+        subtask.id,
+        [
+          sql`
+          INSERT INTO public.subtask_memos (id, subtask_id, body)
+          SELECT ${id}, ${subtask.id}, ${text}
+          WHERE (SELECT count(*) FROM public.subtask_memos WHERE subtask_id = ${subtask.id}) < ${MAX_SUBTASK_MEMOS_PER_SUBTASK}
+        `,
+        ],
+        0,
+        "subtask memo",
+      );
       return c.json({ id }, 201);
     },
   );
