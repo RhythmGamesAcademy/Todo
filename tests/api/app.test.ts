@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseCloudState } from "../../src/cloud/parse";
-import { createApp } from "./app";
-import type { ObjectStorage } from "./object-storage.js";
-import { makeDb } from "./sql";
+import { createApp } from "../../api/src/app";
+import type { ObjectStorage } from "../../api/src/object-storage.js";
+import { makeDb } from "../../api/src/sql";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

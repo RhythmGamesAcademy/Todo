@@ -5,9 +5,9 @@ import {
   MAX_SUBTASK_MEMOS_PER_SUBTASK,
   MAX_TODOS_PER_LIST,
   createApp,
-} from "./app";
-import type { ObjectStorage } from "./object-storage";
-import type { Sql, Transact, TransactGuarded } from "./sql";
+} from "../../api/src/app";
+import type { ObjectStorage } from "../../api/src/object-storage";
+import type { Sql, Transact, TransactGuarded } from "../../api/src/sql";
 
 // DB なしで上限ロジックを検証するためのスタブ。TEST_DATABASE_URL が無い環境
 // (CI 含む)でも app.test.ts の DB 結合テストが skip になるため、M-004 の

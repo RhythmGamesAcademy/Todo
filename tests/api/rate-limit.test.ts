@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { clientIp, rateLimit } from "./rate-limit.js";
+import { clientIp, rateLimit } from "../../api/src/rate-limit.js";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
