@@ -7,7 +7,7 @@ import {
   createApp,
 } from "./app";
 import type { ObjectStorage } from "./object-storage";
-import type { Sql, Transact } from "./sql";
+import type { Sql, Transact, TransactGuarded } from "./sql";
 
 // DB なしで上限ロジックを検証するためのスタブ。TEST_DATABASE_URL が無い環境
 // (CI 含む)でも app.test.ts の DB 結合テストが skip になるため、M-004 の
@@ -18,7 +18,7 @@ const TODO_ID = "22222222-2222-2222-2222-222222222222";
 const SUBTASK_ID = "33333333-3333-3333-3333-333333333333";
 const TOKEN = "test-token";
 
-const todoRow = () => ({
+const todoRow = (deletedAt: string | null = null) => ({
   id: TODO_ID,
   title: "TODO",
   description: "",
@@ -34,7 +34,7 @@ const todoRow = () => ({
   created_by: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
-  deleted_at: null,
+  deleted_at: deletedAt,
 });
 
 const subtaskRow = () => ({
@@ -55,8 +55,14 @@ interface RowCounts {
   subtaskMemos: number;
 }
 
-const makeStubDb = (counts: RowCounts) => {
+const makeStubDb = (counts: RowCounts, todoDeleted = false) => {
   const seen: string[] = [];
+  const statementText = new WeakMap<object, string>();
+  const locks = new Map<string, Promise<void>>();
+  const currentCounts = { ...counts };
+  const guardedLockKeys: string[] = [];
+  const guardedTransactions: string[][] = [];
+  const executedGuardedTransactions: string[][] = [];
   const result = (rows: unknown[]) =>
     ({
       rows,
@@ -66,6 +72,9 @@ const makeStubDb = (counts: RowCounts) => {
   const sql = ((strings: TemplateStringsArray, ..._values: unknown[]) => {
     const text = strings.join("?").replace(/\s+/g, " ");
     seen.push(text);
+    const query = Promise.resolve(result([]));
+    statementText.set(query, text);
+    if (/^\s*(INSERT|UPDATE|DELETE)/.test(text)) return query;
     if (text.includes("FROM public.lists WHERE token"))
       return Promise.resolve(
         result([{ id: LIST_ID, title: "リスト", revision: "1" }]),
@@ -85,19 +94,74 @@ const makeStubDb = (counts: RowCounts) => {
     if (text.includes("coalesce(sum(a.size_bytes), 0)"))
       return Promise.resolve(result([{ total: 0 }]));
     if (text.includes("FROM public.todos WHERE id"))
-      return Promise.resolve(result([todoRow()]));
+      return Promise.resolve(
+        result([todoRow(todoDeleted ? "2026-01-02T00:00:00Z" : null)]),
+      );
     if (text.includes("FROM public.subtasks WHERE id"))
       return Promise.resolve(result([subtaskRow()]));
     if (text.includes("FROM public.users WHERE list_id"))
       return Promise.resolve(result([]));
-    // INSERT/UPDATE/DELETE は transact 経由で実行される SqlCall 生成時の
-    // 呼び出し。内容は検証対象外なので成功として扱う。
-    if (/^\s*(INSERT|UPDATE|DELETE)/.test(text))
-      return Promise.resolve(result([]));
     throw new Error(`unexpected query: ${text}`);
   }) as unknown as Sql;
   const transact: Transact = async () => {};
-  return { sql, transact, seen };
+  const transactGuarded: TransactGuarded = async (
+    lockKey,
+    statements,
+    guardedStatementIndex,
+  ) => {
+    const previous = locks.get(lockKey) ?? Promise.resolve();
+    let release = () => {};
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    locks.set(
+      lockKey,
+      previous.then(() => current),
+    );
+    await previous;
+    try {
+      guardedLockKeys.push(lockKey);
+      const texts = statements.map(
+        (statement) => statementText.get(statement as object) ?? "",
+      );
+      guardedTransactions.push(texts);
+      const statement = texts[guardedStatementIndex];
+      if (statement.includes("INSERT INTO public.todos")) {
+        if (currentCounts.todos >= MAX_TODOS_PER_LIST) return false;
+        currentCounts.todos += 1;
+      } else if (
+        statement.includes("UPDATE public.todos SET deleted_at = NULL")
+      ) {
+        if (currentCounts.todos >= MAX_TODOS_PER_LIST) return false;
+        currentCounts.todos += 1;
+      } else if (statement.includes("INSERT INTO public.subtasks")) {
+        if (currentCounts.subtasks >= MAX_SUBTASKS_PER_TODO) return false;
+        currentCounts.subtasks += 1;
+      } else if (statement.includes("INSERT INTO public.memos")) {
+        if (currentCounts.memos >= MAX_MEMOS_PER_TODO) return false;
+        currentCounts.memos += 1;
+      } else if (statement.includes("INSERT INTO public.subtask_memos")) {
+        if (currentCounts.subtaskMemos >= MAX_SUBTASK_MEMOS_PER_SUBTASK)
+          return false;
+        currentCounts.subtaskMemos += 1;
+      } else {
+        throw new Error(`unexpected guarded query: ${statement}`);
+      }
+      executedGuardedTransactions.push(texts);
+      return true;
+    } finally {
+      release();
+    }
+  };
+  return {
+    sql,
+    transact,
+    transactGuarded,
+    seen,
+    guardedLockKeys,
+    guardedTransactions,
+    executedGuardedTransactions,
+  };
 };
 
 const postJson = (
@@ -165,6 +229,49 @@ describe("行数上限(監査 M-004)", () => {
     expect(res.status).toBe(201);
   });
 
+  it("上限直前の並行TODO作成でも上限を超えない", async () => {
+    const db = makeStubDb({
+      todos: MAX_TODOS_PER_LIST - 1,
+      subtasks: 0,
+      memos: 0,
+      subtaskMemos: 0,
+    });
+    const app = createApp(db);
+    const results = await Promise.all([
+      postJson(app, `/api/lists/${TOKEN}/todos`, TODO_BODY),
+      postJson(app, `/api/lists/${TOKEN}/todos`, TODO_BODY),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([201, 400]);
+    expect(db.guardedTransactions).toHaveLength(2);
+    expect(db.executedGuardedTransactions).toHaveLength(1);
+    expect(db.guardedLockKeys).toEqual([LIST_ID, LIST_ID]);
+    expect(db.guardedTransactions[0][0]).toContain("SELECT count(*)");
+  });
+
+  it("TODO作成と削除済みTODOの並行復元でもリスト上限を超えない", async () => {
+    const db = makeStubDb(
+      {
+        todos: MAX_TODOS_PER_LIST - 1,
+        subtasks: 0,
+        memos: 0,
+        subtaskMemos: 0,
+      },
+      true,
+    );
+    const app = createApp(db);
+    const results = await Promise.all([
+      postJson(app, `/api/lists/${TOKEN}/todos`, TODO_BODY),
+      postJson(app, `/api/lists/${TOKEN}/todos/${TODO_ID}/restore`, {}),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([201, 400]);
+    expect(db.guardedTransactions).toHaveLength(2);
+    expect(db.executedGuardedTransactions).toHaveLength(1);
+    expect(db.guardedLockKeys).toEqual([LIST_ID, LIST_ID]);
+    expect(db.guardedTransactions[0][0]).toContain("SELECT count(*)");
+    expect(db.guardedTransactions[1][0]).toContain("SELECT count(*)");
+  });
+
   it("サブタスク数が上限未満ならサブタスク作成は201になる", async () => {
     const app = createApp(
       makeStubDb({
@@ -217,6 +324,49 @@ describe("行数上限(監査 M-004)", () => {
       { body: "メモ" },
     );
     expect(res.status).toBe(201);
+  });
+
+  it("削除済みTODOは有効TODO数が上限なら復元できない", async () => {
+    const app = createApp(
+      makeStubDb(
+        {
+          todos: MAX_TODOS_PER_LIST,
+          subtasks: 0,
+          memos: 0,
+          subtaskMemos: 0,
+        },
+        true,
+      ),
+    );
+    const res = await postJson(
+      app,
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/restore`,
+      {},
+    );
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "todo limit reached",
+    });
+  });
+
+  it("削除済みTODOは有効TODO数に余裕があれば復元できる", async () => {
+    const app = createApp(
+      makeStubDb(
+        {
+          todos: MAX_TODOS_PER_LIST - 1,
+          subtasks: 0,
+          memos: 0,
+          subtaskMemos: 0,
+        },
+        true,
+      ),
+    );
+    const res = await postJson(
+      app,
+      `/api/lists/${TOKEN}/todos/${TODO_ID}/restore`,
+      {},
+    );
+    expect(res.status).toBe(200);
   });
 
   it("TODOメモ数が上限に達したTODOではメモ作成が400になる", async () => {

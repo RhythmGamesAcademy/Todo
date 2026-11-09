@@ -12,6 +12,11 @@ export type Sql = (
 ) => Promise<QueryResult>;
 export type SqlCall = ReturnType<Sql>;
 export type Transact = (statements: SqlCall[]) => Promise<void>;
+export type TransactGuarded = (
+  lockKey: string,
+  statements: SqlCall[],
+  guardedStatementIndex: number,
+) => Promise<boolean>;
 export type DbInfo = {
   urlFingerprint: string;
   database: string;
@@ -27,6 +32,7 @@ type TransactionQuery = NeonQueryPromise<false, true, FullResult>;
 export function makeDb(url: string): {
   sql: Sql;
   transact: Transact;
+  transactGuarded: TransactGuarded;
   describe: () => Promise<DbInfo>;
 } {
   const query = neon(url, { fullResults: true });
@@ -36,6 +42,19 @@ export function makeDb(url: string): {
     query(strings, ...values)) as unknown as Sql;
   const transact: Transact = async (statements) => {
     await query.transaction(statements as unknown as TransactionQuery[]);
+  };
+  const transactGuarded: TransactGuarded = async (
+    lockKey,
+    statements,
+    guardedStatementIndex,
+  ) => {
+    // 異なる親 ID の hash collision は余分な直列化のみで、正しさには影響しない。
+    const lock = sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    const results = await query.transaction([
+      lock,
+      ...statements,
+    ] as unknown as TransactionQuery[]);
+    return results[guardedStatementIndex + 1].rowCount > 0;
   };
   const describe = async (): Promise<DbInfo> => {
     const result = await sql`
@@ -61,5 +80,5 @@ export function makeDb(url: string): {
       lists: row.lists,
     };
   };
-  return { sql, transact, describe };
+  return { sql, transact, transactGuarded, describe };
 }
