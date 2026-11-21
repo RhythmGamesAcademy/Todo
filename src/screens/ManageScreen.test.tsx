@@ -63,6 +63,7 @@ function setup(overrides: Partial<ManageScreenProps> = {}) {
     token: "token-1",
     ask: vi.fn(async () => false),
     onRenameList: vi.fn(async () => true),
+    onUpdateWebhook: vi.fn(async () => true),
     onRemoveList: vi.fn(async () => true),
     onRenameMember: vi.fn(async () => true),
     onRemoveMember: vi.fn(async () => true),
@@ -159,6 +160,57 @@ describe("管理画面", () => {
     });
     await waitFor(() => expect(props.onRemoveList).toHaveBeenCalledTimes(1));
     expect(props.onSessionLost).toHaveBeenCalledTimes(1);
+  });
+
+  it("Webhook URL は変更したときだけ保存する", async () => {
+    const user = userEvent.setup();
+    const props = setup({
+      state: {
+        ...base,
+        list: { ...base.list, webhookUrl: "https://example.com/old" },
+      },
+    });
+    render(<ManageScreen {...props} />);
+
+    const input = screen.getByLabelText(messages.manage.webhookLabel);
+    expect(input).toHaveValue("https://example.com/old");
+
+    await user.click(
+      screen.getByRole("button", { name: messages.manage.saveWebhook }),
+    );
+    expect(props.onUpdateWebhook).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, "https://example.com/new-hook");
+    await user.click(
+      screen.getByRole("button", { name: messages.manage.saveWebhook }),
+    );
+
+    await waitFor(() =>
+      expect(props.onUpdateWebhook).toHaveBeenCalledWith(
+        "https://example.com/new-hook",
+      ),
+    );
+  });
+
+  it("Webhook URL を空にすると null でクリアする", async () => {
+    const user = userEvent.setup();
+    const props = setup({
+      state: {
+        ...base,
+        list: { ...base.list, webhookUrl: "https://example.com/old" },
+      },
+    });
+    render(<ManageScreen {...props} />);
+
+    await user.clear(screen.getByLabelText(messages.manage.webhookLabel));
+    await user.click(
+      screen.getByRole("button", { name: messages.manage.saveWebhook }),
+    );
+
+    await waitFor(() =>
+      expect(props.onUpdateWebhook).toHaveBeenCalledWith(null),
+    );
   });
 
   it("共有URLは #token= 形式で、コピーできる", async () => {

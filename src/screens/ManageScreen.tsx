@@ -11,6 +11,7 @@ export interface ManageScreenProps {
   token: string;
   ask(options: AskOptions): Promise<boolean>;
   onRenameList(title: string): Promise<boolean>;
+  onUpdateWebhook(url: string | null): Promise<boolean>;
   onRemoveList(): Promise<boolean>;
   onRenameMember(id: string, name: string): Promise<boolean>;
   onRemoveMember(id: string): Promise<boolean>;
@@ -25,6 +26,7 @@ export function ManageScreen({
   token,
   ask,
   onRenameList,
+  onUpdateWebhook,
   onRemoveList,
   onRenameMember,
   onRemoveMember,
@@ -33,6 +35,7 @@ export function ManageScreen({
   onOpenData,
 }: ManageScreenProps) {
   const [title, setTitle] = useState(state.list.title);
+  const [webhookUrl, setWebhookUrl] = useState(state.list.webhookUrl ?? "");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const shareUrl =
     window.location.origin +
@@ -45,15 +48,28 @@ export function ManageScreen({
   useEffect(() => {
     setTitle(state.list.title);
   }, [state.list.title]);
+  useEffect(() => {
+    setWebhookUrl(state.list.webhookUrl ?? "");
+  }, [state.list.webhookUrl]);
 
   const draftOf = (user: CloudUser) => drafts[user.id] ?? user.name;
   const titleChanged = title.trim() !== state.list.title && title.trim() !== "";
+  const webhookChanged =
+    webhookUrl.trim() !== (state.list.webhookUrl ?? "");
 
   async function saveTitle(event: FormEvent) {
     event.preventDefault();
     const next = title.trim();
     if (!next || next === state.list.title) return;
     if (await onRenameList(next)) setTitle(next);
+  }
+
+  async function saveWebhook(event: FormEvent) {
+    event.preventDefault();
+    const next = webhookUrl.trim();
+    const normalized = next === "" ? null : next;
+    if (normalized === (state.list.webhookUrl ?? null)) return;
+    if (await onUpdateWebhook(normalized)) setWebhookUrl(next);
   }
 
   async function saveMember(event: FormEvent, user: CloudUser) {
@@ -146,6 +162,33 @@ export function ManageScreen({
             {messages.manage.save}
           </button>
         </form>
+      </section>
+      <section
+        className="manage-section"
+        aria-labelledby="manage-webhook-heading"
+      >
+        <h3 id="manage-webhook-heading">{messages.manage.webhookTitle}</h3>
+        <form className="manage-inline-form" onSubmit={saveWebhook}>
+          <label className="sr-only" htmlFor="manage-webhook-url">
+            {messages.manage.webhookLabel}
+          </label>
+          <input
+            id="manage-webhook-url"
+            className="text-input"
+            type="url"
+            value={webhookUrl}
+            placeholder={messages.manage.webhookPlaceholder}
+            onChange={(event) => setWebhookUrl(event.target.value)}
+          />
+          <button
+            type="submit"
+            className="button button-secondary"
+            disabled={!webhookChanged}
+          >
+            {messages.manage.save}
+          </button>
+        </form>
+        <p className="manage-help">{messages.manage.webhookHelp}</p>
       </section>
       <section
         className="manage-section"

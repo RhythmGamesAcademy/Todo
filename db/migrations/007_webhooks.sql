@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE public.lists
+  ADD COLUMN IF NOT EXISTS webhook_url TEXT;
+
+COMMIT;

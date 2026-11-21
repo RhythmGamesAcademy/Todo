@@ -2591,6 +2591,9 @@ input[type="checkbox"] {
 }
 
 /* タグのプルダウン(Headless UI Listbox) */
+.tag-select {
+  position: relative;
+}
 .tag-select-button {
   display: flex;
   align-items: center;
@@ -2627,8 +2630,10 @@ input[type="checkbox"] {
   transform: rotate(180deg);
 }
 .tag-select-options {
-  width: var(--button-width, 100%);
-  min-width: 220px;
+  position: absolute;
+  top: calc(100% - 10px);
+  left: 0;
+  width: 100%;
   max-height: 240px;
   overflow-y: auto;
   z-index: 40;

@@ -1472,6 +1472,100 @@ describeDb("添付のリスト予算", () => {
     });
   };
 
+  it("リスト設定の webhookUrl を検証・保存・取得できる", async () => {
+    const created = await app.request("/api/lists", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Webhookテスト", name: "あき" }),
+    });
+    const { token } = (await created.json()) as { token: string };
+
+    const initial = await app.request(`/api/lists/${token}`);
+    const initialBody = await initial.json();
+    expect(initialBody.list.webhookUrl).toBeUndefined();
+
+    const invalid = await app.request(`/api/lists/${token}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webhookUrl: "ftp://example.com/hook" }),
+    });
+    expect(invalid.status).toBe(400);
+
+    const privateUrl = await app.request(`/api/lists/${token}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webhookUrl: "http://127.0.0.1/hook" }),
+    });
+    expect(privateUrl.status).toBe(400);
+
+    const saved = await app.request(`/api/lists/${token}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webhookUrl: "https://example.com/hook" }),
+    });
+    expect(saved.status).toBe(200);
+
+    const afterSave = await app.request(`/api/lists/${token}`);
+    const savedBody = await afterSave.json();
+    expect(savedBody.list.webhookUrl).toBe("https://example.com/hook");
+
+    const cleared = await app.request(`/api/lists/${token}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webhookUrl: "" }),
+    });
+    expect(cleared.status).toBe(200);
+    const clearedBody = await (await app.request(`/api/lists/${token}`)).json();
+    expect(clearedBody.list.webhookUrl).toBeUndefined();
+  });
+
+  it("todo作成時に webhook が設定されていれば dispatch する", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init });
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const created = await app.request("/api/lists", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Webhook dispatch", name: "あき" }),
+      });
+      const { token } = (await created.json()) as { token: string };
+
+      await app.request(`/api/lists/${token}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ webhookUrl: "https://example.com/hook" }),
+      });
+
+      const todoRes = await app.request(`/api/lists/${token}/todos`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Webhook対象",
+          status: "todo",
+          priority: "medium",
+        }),
+      });
+      expect(todoRes.status).toBe(201);
+      const todoBody = (await todoRes.json()) as { id: string };
+
+      await new Promise((r) => setTimeout(r, 50));
+      const hookCall = fetchCalls.find((c) => c.url === "https://example.com/hook");
+      expect(hookCall).toBeTruthy();
+      expect(hookCall?.init?.method).toBe("POST");
+      const payload = JSON.parse(String(hookCall?.init?.body));
+      expect(payload.event).toBe("todo.created");
+      expect(payload.list.token).toBe(token);
+      expect(payload.todo.id).toBe(todoBody.id);
+      expect(payload.todo.title).toBe("Webhook対象");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("合計バイト数が上限を超えるとTODO単位でもメモ経由でも400", async () => {
     const res = await postTxt("予算超過");
     expect(res.status).toBe(400);

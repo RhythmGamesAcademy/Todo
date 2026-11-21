@@ -24,6 +24,7 @@ import {
   sendMemo,
   sendMemoWithAttachment,
   sendSubtaskMemo,
+  updateListSettings as updateListSettingsApi,
   uploadMemoAttachment,
   uploadTodoAttachment,
 } from "./client";
@@ -57,6 +58,10 @@ export type BoardActions = {
     body: string,
   ) => Promise<void>;
   renameBoard: (title: string) => Promise<void>;
+  updateBoardSettings: (patch: {
+    title?: string;
+    webhookUrl?: string | null;
+  }) => Promise<void>;
   removeBoard: () => Promise<void>;
   renameMember: (id: string, name: string) => Promise<void>;
   removeMember: (id: string) => Promise<void>;
@@ -300,6 +305,11 @@ export function useBoard(
     (title: string) => run((current) => renameList(current, title)),
     [run],
   );
+  const updateBoardSettings = useCallback(
+    (patch: { title?: string; webhookUrl?: string | null }) =>
+      run((current) => updateListSettingsApi(current, patch)),
+    [run],
+  );
   const removeBoard = useCallback(
     () => run((current) => deleteList(current)),
     [run],
@@ -398,6 +408,7 @@ export function useBoard(
     removeSubtask,
     addSubtaskMemo,
     renameBoard,
+    updateBoardSettings,
     removeBoard,
     renameMember,
     removeMember,

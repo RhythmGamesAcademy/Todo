@@ -102,6 +102,11 @@ function validateList(value: unknown): void {
     value.revision < 0
   )
     return fail();
+  if (
+    value.webhookUrl !== undefined &&
+    !(typeof value.webhookUrl === "string" && value.webhookUrl.length <= 2000)
+  )
+    return fail();
 }
 
 function validateUser(value: unknown, ids: Set<string>): void {

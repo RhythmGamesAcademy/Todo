@@ -17,6 +17,7 @@ import {
   patchSubtask,
   rejectTodo,
   renameList,
+  updateListSettings,
   sendMemo,
   sendSubtaskMemo,
 } from "./client";
@@ -381,5 +382,33 @@ describe("申請の承認・否認と通知の全既読", () => {
     await fetchState("tok-1");
 
     expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1");
+  });
+});
+
+describe("リスト設定更新", () => {
+  it("updateListSettings は webhookUrl を PATCH で送り、userId を添える", async () => {
+    writeSession({ token: "tok-1", userId: "user-1", name: "あき" });
+    const mock = stubFetch({ body: { revision: 5 } });
+
+    await updateListSettings("tok-1", { webhookUrl: "https://example.com/hook" });
+
+    expect(mock.mock.calls[0][0]).toBe("/api/lists/tok-1");
+    expect(mock.mock.calls[0][1]?.method).toBe("PATCH");
+    expect(bodyOf(mock)).toEqual({
+      webhookUrl: "https://example.com/hook",
+      userId: "user-1",
+    });
+  });
+
+  it("updateListSettings は webhookUrl を null でクリアできる", async () => {
+    writeSession({ token: "tok-1", userId: "user-1", name: "あき" });
+    const mock = stubFetch({ body: { revision: 6 } });
+
+    await updateListSettings("tok-1", { webhookUrl: null });
+
+    expect(bodyOf(mock)).toEqual({
+      webhookUrl: null,
+      userId: "user-1",
+    });
   });
 });

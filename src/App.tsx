@@ -810,6 +810,12 @@ export default function App() {
             token={board.me.token}
             ask={ask}
             onRenameList={(title) => act(() => board.renameBoard(title))}
+            onUpdateWebhook={async (url) =>
+              act(async () => {
+                await board.updateBoardSettings({ webhookUrl: url });
+                setToast({ message: messages.manage.webhookSaved });
+              })
+            }
             onRemoveList={() => act(() => board.removeBoard())}
             onRenameMember={(id, name) =>
               act(() => board.renameMember(id, name))

@@ -283,6 +283,16 @@ export async function renameList(token: string, title: string): Promise<void> {
   );
 }
 
+export async function updateListSettings(
+  token: string,
+  patch: { title?: string; webhookUrl?: string | null },
+): Promise<void> {
+  await apiFetch<void>(
+    listPath(token),
+    jsonInit("PATCH", withCaller(token, patch)),
+  );
+}
+
 export async function deleteList(token: string): Promise<void> {
   await apiFetch<void>(
     listPath(token),

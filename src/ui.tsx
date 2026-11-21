@@ -602,6 +602,8 @@ export function TodoForm({
           </ul>
         )}
         <Listbox
+          as="div"
+          className="tag-select"
           value=""
           onChange={(tag) => {
             if (tag) commitTag(tag);
@@ -615,11 +617,7 @@ export function TodoForm({
             <span>{messages.tags.selectPlaceholder}</span>
             <ChevronDown size={16} className="tag-select-caret" />
           </ListboxButton>
-          <ListboxOptions
-            transition
-            anchor="bottom start"
-            className="tag-select-options"
-          >
+          <ListboxOptions transition className="tag-select-options">
             {tagOptions.map((tag) => (
               <ListboxOption
                 key={tag}

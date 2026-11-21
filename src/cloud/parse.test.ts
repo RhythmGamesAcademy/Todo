@@ -483,4 +483,25 @@ describe("parseCloudState", () => {
       ),
     );
   });
+
+  it("webhookUrl は省略・文字列を受け入れ、空文字も許容する", () => {
+    expect(
+      parseCloudState(broken((s) => { delete s.list.webhookUrl; })).list.webhookUrl,
+    ).toBeUndefined();
+    expect(
+      parseCloudState(broken((s) => { s.list.webhookUrl = "https://example.com/hook"; })).list.webhookUrl,
+    ).toBe("https://example.com/hook");
+    expect(
+      parseCloudState(broken((s) => { s.list.webhookUrl = ""; })).list.webhookUrl,
+    ).toBe("");
+  });
+
+  it("webhookUrl が文字列でない、または長すぎると拒否する", () => {
+    reject(broken((s) => { s.list.webhookUrl = null; }));
+    reject(broken((s) => { s.list.webhookUrl = 123; }));
+    reject(broken((s) => { s.list.webhookUrl = "a".repeat(2001); }));
+    expect(
+      parseCloudState(broken((s) => { s.list.webhookUrl = "a".repeat(2000); })).list.webhookUrl,
+    ).toBe("a".repeat(2000));
+  });
 });

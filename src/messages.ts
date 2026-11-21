@@ -354,6 +354,12 @@ export const messages = {
     title: "リスト管理",
     listTitleLabel: "リストのタイトル",
     save: "保存",
+    webhookTitle: "Webhook",
+    webhookLabel: "Webhook URL",
+    webhookPlaceholder: "https://example.com/webhook",
+    webhookHelp:
+      "Todoが作成されたとき、このURLにPOSTで通知します。空にすると無効になります。",
+    webhookSaved: "Webhookを更新しました",
     membersTitle: "メンバー",
     memberNameLabel: (name: string) => name + "の名前",
     assignedCount: (count: number) => count + "件担当",

@@ -58,7 +58,7 @@ export interface Activity {
   createdAt: string;
 }
 export interface CloudState {
-  list: { id: string; title: string; revision: number };
+  list: { id: string; title: string; webhookUrl?: string; revision: number };
   users: CloudUser[];
   todos: CloudTodo[];
   activities: Activity[];

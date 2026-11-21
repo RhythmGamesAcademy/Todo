@@ -58,6 +58,7 @@ export const wrongObjectStorageSetup = new ApiException(
 interface ListRow {
   id: string;
   title: string;
+  webhook_url: string | null;
   revision: string | number;
 }
 
@@ -359,7 +360,7 @@ export function createApp({
 
   const findList = async (token: string): Promise<ListRow | null> => {
     const [list] = rowsOf<ListRow>(
-      await sql`SELECT id, title, revision FROM public.lists WHERE token = ${token}`,
+      await sql`SELECT id, title, webhook_url, revision FROM public.lists WHERE token = ${token}`,
     );
     return list ?? null;
   };
@@ -742,6 +743,81 @@ export function createApp({
       VALUES (${randomUUID()}, ${listId}, ${userId}, ${actorId}, ${todoId}, ${kind}, ${body})
     `;
 
+  const isPrivateHostname = (hostname: string): boolean => {
+    const lower = hostname.toLowerCase();
+    if (
+      lower === "localhost" ||
+      lower.endsWith(".localhost") ||
+      lower.endsWith(".local") ||
+      lower.endsWith(".internal")
+    )
+      return true;
+    // IPv4 private/reserved ranges
+    const m = lower.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (m) {
+      const [, a, b] = m.map(Number);
+      if (a === 10) return true;
+      if (a === 127) return true;
+      if (a === 0) return true;
+      if (a === 169 && b === 254) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    }
+    // IPv6 loopback / ULA / link-local
+    if (lower === "::1" || lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd"))
+      return true;
+    return false;
+  };
+
+  const normalizeWebhookUrl = (value: unknown): string | null => {
+    if (value === null) return null;
+    if (typeof value !== "string")
+      throw new ApiException(400, "webhookUrl must be a string or null");
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    let url: URL;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      throw new ApiException(400, "webhookUrl is invalid");
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:")
+      throw new ApiException(400, "webhookUrl must be http or https");
+    if (isPrivateHostname(url.hostname))
+      throw new ApiException(400, "webhookUrl must be a public URL");
+    return url.toString();
+  };
+
+  const dispatchWebhook = async (
+    webhookUrl: string | null | undefined,
+    event: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> => {
+    if (!webhookUrl) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "user-agent": "hitotsuzutsu-webhook/1.0",
+        },
+        body: JSON.stringify({
+          event,
+          occurredAt: new Date().toISOString(),
+          ...payload,
+        }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      console.error("webhook delivery failed", { event, webhookUrl, error });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   // 承認・否認の通知先は TODO の担当者と作成者。操作者自身には送らない。
   const approvalRecipients = (
     row: TodoRecordRow,
@@ -778,21 +854,34 @@ export function createApp({
     const list = await findList(c.req.param("token"));
     if (!list) return notFound(c);
     const body = await readJson(c);
-    const title = assertText(body.title, 120, "title");
+    const hasTitle = body.title !== undefined;
+    const hasWebhookUrl = body.webhookUrl !== undefined;
+    if (!hasTitle && !hasWebhookUrl)
+      throw new ApiException(400, "no changes");
+
+    const nextTitle = hasTitle ? assertText(body.title, 120, "title") : list.title;
+    const nextWebhookUrl = hasWebhookUrl
+      ? normalizeWebhookUrl(body.webhookUrl)
+      : list.webhook_url;
     const userId = await readOptionalUserId(body, list.id);
 
-    await transact([
-      sql`UPDATE public.lists SET title = ${title} WHERE id = ${list.id}`,
-      addActivity(
-        list.id,
-        null,
-        userId,
-        "list.renamed",
-        "title",
-        list.title,
-        title,
-      ),
-    ]);
+    const statements: SqlCall[] = [
+      sql`UPDATE public.lists SET title = ${nextTitle}, webhook_url = ${nextWebhookUrl} WHERE id = ${list.id}`,
+    ];
+    if (hasTitle && nextTitle !== list.title) {
+      statements.push(
+        addActivity(
+          list.id,
+          null,
+          userId,
+          "list.renamed",
+          "title",
+          list.title,
+          nextTitle,
+        ),
+      );
+    }
+    await transact(statements);
     return c.json({ revision: await readRevision(list.id) });
   });
 
@@ -954,12 +1043,33 @@ export function createApp({
     if (userId !== null)
       for (const assigneeId of assigneeIds)
         if (assigneeId !== userId)
-          statements.push(sql`
-            INSERT INTO public.notifications (id, list_id, user_id, actor_id, todo_id, kind, body)
-            SELECT ${randomUUID()}, ${list.id}, ${assigneeId}, ${userId}, ${id}, 'todo.assigned', ${title}
-            WHERE EXISTS (SELECT 1 FROM public.todos WHERE id = ${id})
-          `);
-    await transactWithinRowLimit(list.id, statements, 0, "todo");
+          statements.push(
+            addNotification(
+              list.id,
+              id,
+              assigneeId,
+              userId,
+              "todo.assigned",
+              title,
+            ),
+          );
+    await transact(statements);
+    await dispatchWebhook(list.webhook_url, "todo.created", {
+      list: { id: list.id, title: list.title },
+      todo: {
+        id,
+        title,
+        description,
+        status,
+        priority,
+        due: deadline,
+        tags,
+        assigneeIds,
+        approvalStatus,
+        createdBy: userId,
+      },
+      actorUserId: userId,
+    });
     return c.json({ id }, 201);
   });
 
@@ -1730,6 +1840,7 @@ export function createApp({
       list: {
         id: list.id,
         title: list.title,
+        webhookUrl: list.webhook_url ?? undefined,
         revision: Number(list.revision),
       },
       users: rowsOf<UserRow>(usersResult).map((user): CloudUser => ({
