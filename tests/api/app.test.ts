@@ -1558,7 +1558,8 @@ describeDb("添付のリスト予算", () => {
       expect(hookCall?.init?.method).toBe("POST");
       const payload = JSON.parse(String(hookCall?.init?.body));
       expect(payload.event).toBe("todo.created");
-      expect(payload.list.token).toBe(token);
+      expect(payload.list).toEqual({ id: expect.any(String), title: "Webhook dispatch" });
+      expect(payload.list).not.toHaveProperty("token");
       expect(payload.todo.id).toBe(todoBody.id);
       expect(payload.todo.title).toBe("Webhook対象");
     } finally {
